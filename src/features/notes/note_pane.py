@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtGui import QFont, QTextListFormat, QTextCursor
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QUrl
 
 class NotePane(QTextEdit):
     focus_received = pyqtSignal(object) # Signal to notify main window of focus
@@ -97,19 +97,64 @@ class NotePane(QTextEdit):
                      self.resizing_image = True
                      self.resize_start_pos = event.pos()
                      
-                     # Key fix: Set the text cursor to be the one at the mouse position
-                     # This ensures we are operating on the correct image
+                     # 1. Correct selection logic
                      self.setTextCursor(cursor)
-                     
-                     # Now select the image. Since we clicked bottom-right, the cursor is AFTER the image.
-                     # We move LEFT, keeping anchor, to select it.
                      selection_cursor = self.textCursor()
                      selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-                     self.setTextCursor(selection_cursor) # Apply selection
-                     
+                     self.setTextCursor(selection_cursor)
                      self.resize_cursor = selection_cursor
                      
-                     self.resize_orig_size = rect.size()
+                     # 2. Correct size retrieval logic
+                     img_fmt = fmt.toImageFormat()
+                     current_width = img_fmt.width()
+                     current_height = img_fmt.height()
+
+                     if current_width > 0:
+                         # Use existing resized width
+                         from PyQt6.QtCore import QSize
+                         self.resize_orig_size = QSize(int(current_width), int(current_height) if current_height > 0 else 0)
+                     else:
+                         # Width is 0 or -1 (default). Need to get NATURAL size from Image Resource.
+                         name = img_fmt.name()
+                         doc = self.document()
+                         # Resources are stored in document by name (url)
+                         # But wait, we used base64 data URI.
+                         # PyQt handles base64 URIs internally but referencing them back is tricky.
+                         # Alternative: Select the images and get the fragment.
+                         
+                         # Easier way: The cursor with selection logic actually selects an image char.
+                         # But getting the QImage object from char format is not direct for external images.
+                         # However, since we inserted base64, the "name" IS the data URI in older Qt, or internally managed.
+                         
+                         # Best approach for reliability:
+                         # Let's trust the rect logic BUT only if we are actually over the image?
+                         # Issue with cursorRect(cursor) is that it gives the cursor position, not the image rect.
+                         # The image rect is obtained differently.
+                         
+                         # Let's try image_interface logic 
+                         # Actually, cursorRect(selection_cursor) might work better if we have selection?
+                         # No, cursorRect returns the rect of the cursor itself.
+                         
+                         # Let's look at how we get the rect for hit testing.
+                         # 'rect' variable from above:
+                         # rect = self.cursorRect(cursor) -> This was the buggy part.
+                         
+                         # CORRECT WAY to get Image Rect:
+                         # We need to iterate blocks or use document layout.
+                         # But a simpler hack for resize dragging:
+                         # We only need the WIDTH. If it's unset, it's the full width of the view usually?
+                         # No, it's the image width.
+                         
+                         # Attempt to load the image from the resource name if possible
+                         image = doc.resource(3, QUrl(name)) # 3 = QTextDocument.ImageResource
+                         if image and not image.isNull():
+                              self.resize_orig_size = image.size()
+                         else:
+                              # Fallback to a reasonable default or try to get it from layout
+                              # If we can't find it, start at 300?
+                              from PyQt6.QtCore import QSize
+                              self.resize_orig_size = QSize(200, 200)
+
                      return # Consume event
 
         super().mousePressEvent(event)
