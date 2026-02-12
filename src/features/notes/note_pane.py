@@ -10,6 +10,8 @@ class NotePane(QTextEdit):
         self.setPlaceholderText("Type notes here... (Paste images supported)")
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
+        self.setAcceptDrops(True)
+        self.setDragEnabled(True) # Enable dragging text/images
         
         self.setStyleSheet("""
             QTextEdit {
@@ -65,6 +67,20 @@ class NotePane(QTextEdit):
         if fmt.isImageFormat():
             menu.addSeparator()
             
+            # Alignment Submenu
+            align_menu = menu.addMenu("📏 Alignment")
+            
+            align_left = align_menu.addAction("⬅️ Align Left")
+            align_left.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignLeft))
+            
+            align_center = align_menu.addAction("⏺️ Align Center")
+            align_center.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignCenter))
+            
+            align_right = align_menu.addAction("➡️ Align Right")
+            align_right.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignRight))
+            
+            menu.addSeparator()
+            
             resize_act = menu.addAction("🖼️ Resize Image...")
             resize_act.triggered.connect(lambda: self.resize_image_dialog(cursor))
             
@@ -75,6 +91,20 @@ class NotePane(QTextEdit):
             save_act.triggered.connect(lambda: self.save_image_as(cursor))
             
         menu.exec(event.globalPos())
+
+    def set_image_alignment(self, cursor, alignment):
+        # Alignment applies to the BLOCK (Paragraph) containing the image.
+        # This will align the image AND any text on the same line.
+        
+        # 1. Select the block
+        block_cursor = QTextCursor(cursor)
+        
+        # 2. Apply Block Format
+        from PyQt6.QtGui import QTextBlockFormat
+        block_fmt = QTextBlockFormat()
+        block_fmt.setAlignment(alignment)
+        
+        block_cursor.mergeBlockFormat(block_fmt)
 
     def resize_image_dialog(self, cursor):
         from PyQt6.QtWidgets import QInputDialog
