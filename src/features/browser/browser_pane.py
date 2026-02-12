@@ -72,3 +72,6 @@ class BrowserPane(QWidget):
     def update_url_bar(self, q):
         self.url_bar.setText(q.toString())
         self.url_bar.setCursorPosition(0)
+
+    def load_url(self, url_str):
+        self.browser.setUrl(QUrl(url_str))

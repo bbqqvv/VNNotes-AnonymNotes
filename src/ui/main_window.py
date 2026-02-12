@@ -15,6 +15,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.setWindowTitle("Stealth Assist")
+        self.setWindowIcon(QIcon("appnote.png"))
         
         # Load Geometry
         geo = self.config.get_value("window/geometry")
@@ -24,7 +25,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         else:
-            self.resize(1000, 700)
+            self.resize(1200, 800)
             
         self.dock_widgets = []
         

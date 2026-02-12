@@ -11,18 +11,14 @@ from win32com.client import Dispatch
 class InstallerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Stealth Assist Installer")
-        self.geometry("500x350")
+        self.title("Stealth Assist Setup")
+        self.geometry("600x400")
         self.resizable(False, False)
+        self.configure(bg="white")
         
-        # Icon
-        # try:
-        #     self.iconbitmap(self.resource_path("appnote.ico"))
-        # except:
-        #     pass
-
         self.install_dir = os.path.join(os.environ['LOCALAPPDATA'], "StealthAssist")
         self.zip_path = self.resource_path("data.zip")
+        self.logo_path = self.resource_path("appnote.png")
         
         self.frames = {}
         self.current_frame = None
@@ -31,9 +27,7 @@ class InstallerApp(tk.Tk):
         self.show_frame("Welcome")
 
     def resource_path(self, relative_path):
-        """ Get absolute path to resource, works for dev and for PyInstaller """
         try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
             base_path = sys._MEIPASS
         except Exception:
             base_path = os.path.abspath(".")
@@ -42,67 +36,118 @@ class InstallerApp(tk.Tk):
     def setup_ui(self):
         # Styles
         style = ttk.Style()
-        style.configure("TButton", padding=6, relief="flat", background="#ccc")
-        style.configure("TLabel", font=("Segoe UI", 10))
-        style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"))
+        style.theme_use('clam')
+        style.configure("TFrame", background="white")
+        style.configure("TLabel", background="white", font=("Segoe UI", 10))
+        style.configure("Header.TLabel", background="white", font=("Segoe UI", 14, "bold"), foreground="#2c3e50")
+        style.configure("TButton", padding=6)
         
-        container = ttk.Frame(self)
-        container.pack(fill="both", expand=True, padx=20, pady=20)
+        # Sidebar with Logo
+        sidebar = tk.Frame(self, bg="#2c3e50", width=160)
+        sidebar.pack(side="left", fill="y")
+        
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(self.logo_path)
+            img = img.resize((100, 100), Image.Resampling.LANCZOS)
+            self.logo_img = ImageTk.PhotoImage(img)
+            logo_label = tk.Label(sidebar, image=self.logo_img, bg="#2c3e50")
+            logo_label.pack(pady=40)
+        except Exception as e:
+            print(f"Error loading logo: {e}")
+            tk.Label(sidebar, text="Stealth\nAssist", fg="white", bg="#2c3e50", font=("Segoe UI", 16, "bold")).pack(pady=40)
+        
+        container = tk.Frame(self, bg="white")
+        container.pack(side="right", fill="both", expand=True, padx=30, pady=20)
+
+        # Header Logo (small top right)
+        try:
+            h_img = Image.open(self.logo_path)
+            h_img = h_img.resize((30, 30), Image.Resampling.LANCZOS)
+            self.header_logo_img = ImageTk.PhotoImage(h_img)
+            h_label = tk.Label(container, image=self.header_logo_img, bg="white")
+            h_label.place(relx=1.0, rely=0.0, anchor="ne")
+        except:
+             pass
         
         # Frame 1: Welcome
-        f1 = ttk.Frame(container)
-        lbl = ttk.Label(f1, text="Welcome to Stealth Assist Setup", style="Header.TLabel")
-        lbl.pack(pady=(0, 20))
-        ttk.Label(f1, text="This wizard will install Stealth Assist on your computer.").pack(anchor="w")
-        ttk.Label(f1, text="\nClick Next to continue, or Cancel to exit Setup.").pack(anchor="w")
+        f1 = tk.Frame(container, bg="white")
+        tk.Label(f1, text="Welcome to Stealth Assist Setup", font=("Segoe UI", 16, "bold"), bg="white", fg="#2c3e50").pack(anchor="w", pady=(0, 20))
+        tk.Label(f1, text="This wizard will install Stealth Assist v1.0 on your computer.", bg="white", wraplength=350, justify="left").pack(anchor="w")
+        tk.Label(f1, text="\nStealth Assist is ultra-lightweight and hidden from screen capture software, ensuring your notes stay private.", bg="white", wraplength=350, justify="left").pack(anchor="w")
         self.frames["Welcome"] = f1
         
         # Frame 2: Select Location
-        f2 = ttk.Frame(container)
-        ttk.Label(f2, text="Select Installation Folder", style="Header.TLabel").pack(pady=(0, 20))
-        ttk.Label(f2, text="Where should Stealth Assist be installed?").pack(anchor="w")
+        f2 = tk.Frame(container, bg="white")
+        tk.Label(f2, text="Installation Folder", font=("Segoe UI", 14, "bold"), bg="white", fg="#2c3e50").pack(anchor="w", pady=(0, 20))
+        tk.Label(f2, text="Confirm the installation path below:", bg="white").pack(anchor="w")
         
-        path_frame = ttk.Frame(f2)
+        path_frame = tk.Frame(f2, bg="white")
         path_frame.pack(fill="x", pady=10)
         self.path_entry = ttk.Entry(path_frame)
         self.path_entry.insert(0, self.install_dir)
         self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         ttk.Button(path_frame, text="Browse...", command=self.browse_folder).pack(side="right")
         
-        ttk.Label(f2, text="At least 600 MB of free disk space is required.").pack(anchor="w", pady=10)
+        tk.Label(f2, text="Required space: 600 MB", bg="white", fg="#7f8c8d").pack(anchor="w", pady=10)
         self.frames["Location"] = f2
         
         # Frame 3: Installing
-        f3 = ttk.Frame(container)
-        ttk.Label(f3, text="Installing...", style="Header.TLabel").pack(pady=(0, 20))
-        self.status_label = ttk.Label(f3, text="Preparing...")
+        f3 = tk.Frame(container, bg="white")
+        tk.Label(f3, text="Installing Stealth Assist", font=("Segoe UI", 14, "bold"), bg="white", fg="#2c3e50").pack(anchor="w", pady=(0, 20))
+        self.status_label = tk.Label(f3, text="Extracting components...", bg="white")
         self.status_label.pack(anchor="w")
         self.progress = ttk.Progressbar(f3, mode="determinate")
         self.progress.pack(fill="x", pady=10)
         self.frames["Installing"] = f3
         
         # Frame 4: Finished
-        f4 = ttk.Frame(container)
-        ttk.Label(f4, text="Installation Complete", style="Header.TLabel").pack(pady=(0, 20))
-        ttk.Label(f4, text="Stealth Assist has been installed on your computer.").pack(anchor="w")
+        f4 = tk.Frame(container, bg="white")
+        tk.Label(f4, text="Installation Complete", font=("Segoe UI", 16, "bold"), bg="white", fg="#2c3e50").pack(anchor="w", pady=(0, 20))
+        tk.Label(f4, text="Stealth Assist has been successfully installed.", bg="white").pack(anchor="w")
         self.chk_shortcut = tk.IntVar(value=1)
-        ttk.Checkbutton(f4, text="Create Desktop Shortcut", variable=self.chk_shortcut).pack(anchor="w", pady=10)
+        tk.Checkbutton(f4, text="Create Desktop Shortcut", variable=self.chk_shortcut, bg="white").pack(anchor="w", pady=10)
         self.chk_launch = tk.IntVar(value=1)
-        ttk.Checkbutton(f4, text="Launch Stealth Assist", variable=self.chk_launch).pack(anchor="w")
+        tk.Checkbutton(f4, text="Launch Stealth Assist now", variable=self.chk_launch, bg="white").pack(anchor="w")
         self.frames["Finished"] = f4
 
-        # Navigation Buttons (Bottom)
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill="x", side="bottom", padx=20, pady=20)
-        
-        self.btn_back = ttk.Button(btn_frame, text="< Back", command=self.go_back)
-        self.btn_back.pack(side="left")
-        
-        self.btn_next = ttk.Button(btn_frame, text="Next >", command=self.go_next)
-        self.btn_next.pack(side="right")
+        # Navigation Buttons (Bottom Right)
+        btn_frame = tk.Frame(self, bg="white")
+        btn_frame.place(relx=1.0, rely=1.0, anchor="se", x=-20, y=-20)
         
         self.btn_cancel = ttk.Button(btn_frame, text="Cancel", command=self.destroy)
-        self.btn_cancel.pack(side="right", padx=(0, 10))
+        self.btn_cancel.pack(side="right", padx=(5, 0))
+        
+        self.btn_next = ttk.Button(btn_frame, text="Next >", command=self.go_next)
+        self.btn_next.pack(side="right", padx=(5, 0))
+        
+        self.btn_back = ttk.Button(btn_frame, text="< Back", command=self.go_back)
+        self.btn_back.pack(side="right")
+
+    def show_frame(self, name):
+        if self.current_frame:
+            self.current_frame.pack_forget()
+        self.current_frame = self.frames[name]
+        self.current_frame.pack(fill="both", expand=True)
+        self.current_step = name
+        
+        if name == "Welcome":
+            self.btn_back.state(["disabled"])
+            self.btn_next.state(["!disabled"])
+            self.btn_next.config(text="Next >", command=self.go_next)
+        elif name == "Location":
+            self.btn_back.state(["!disabled"])
+            self.btn_next.state(["!disabled"])
+            self.btn_next.config(text="Install", command=self.start_install)
+        elif name == "Installing":
+            self.btn_back.state(["disabled"])
+            self.btn_next.state(["disabled"])
+            self.btn_cancel.state(["disabled"])
+        elif name == "Finished":
+            self.btn_back.pack_forget()
+            self.btn_cancel.pack_forget()
+            self.btn_next.state(["!disabled"])
+            self.btn_next.config(text="Finish", command=self.finish)
 
     def show_frame(self, name):
         if self.current_frame:
