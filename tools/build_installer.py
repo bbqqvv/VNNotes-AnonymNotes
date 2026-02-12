@@ -13,11 +13,12 @@ def make_installer():
     print("1. Optimizing App Bloat (Removing debug resources)...")
     # Exclusion list: files we don't need
     to_remove = [
-        "PyQt6/qtwebengine_devtools_resources.debug.pak",
-        "PyQt6/translations", # Most users don't need all Qt translations
-        "PyQt6/Qt6Quick.dll", # If not used by Core app? (Check usage, but often safe to remove if only Widgets used)
-        "PyQt6/Qt6Qml.dll",
-        "PyQt6/Qt6Network.dll" # Risk? WebEngine needs Network. Keep but be careful.
+        "PyQt6/Qt6/resources/qtwebengine_devtools_resources.debug.pak",
+        "PyQt6/Qt6/resources/qtwebengine_resources.debug.pak",
+        "PyQt6/Qt6/resources/qtwebengine_resources_100p.debug.pak",
+        "PyQt6/Qt6/resources/qtwebengine_resources_200p.debug.pak",
+        "PyQt6/Qt6/resources/v8_context_snapshot.debug.bin",
+        "PyQt6/translations", 
     ]
     
     for relative_path in to_remove:

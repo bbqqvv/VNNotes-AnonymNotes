@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtGui import QFont, QTextListFormat
+from PyQt6.QtGui import QFont, QTextListFormat, QTextCursor
 from PyQt6.QtCore import pyqtSignal, Qt
 
 class NotePane(QTextEdit):
@@ -61,7 +61,7 @@ class NotePane(QTextEdit):
             bn_right = rect.bottomRight()
             dist = (bn_right - event.pos()).manhattanLength()
             
-            if dist < 20:
+            if dist < 30:
                  self.viewport().setCursor(Qt.CursorShape.SizeFDiagCursor)
             else:
                  self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
@@ -90,10 +90,15 @@ class NotePane(QTextEdit):
             if fmt.isImageFormat():
                  rect = self.cursorRect(cursor)
                  bn_right = rect.bottomRight()
-                 if (bn_right - event.pos()).manhattanLength() < 20:
+                 if (bn_right - event.pos()).manhattanLength() < 30:
                      self.resizing_image = True
                      self.resize_start_pos = event.pos()
-                     self.resize_cursor = cursor
+                     
+                     # Select the image so setCharFormat applies to it
+                     # Cursor is after the image (since hitting bottom-right)
+                     selection_cursor = QTextCursor(cursor)
+                     selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+                     self.resize_cursor = selection_cursor
                      
                      img_fmt = fmt.toImageFormat()
                      self.resize_orig_size = rect.size()
@@ -179,5 +184,37 @@ class NotePane(QTextEdit):
                 
                 
         super().insertFromMimeData(source)
+
+    def insert_image_from_file(self):
+        """Open file dialog and insert selected image"""
+        from PyQt6.QtWidgets import QFileDialog
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtCore import QBuffer, QIODevice
+        import base64
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Load image
+        image = QImage(file_path)
+        if image.isNull():
+            return
+        
+        # Convert to base64
+        ba = QBuffer()
+        ba.open(QIODevice.OpenModeFlag.WriteOnly)
+        image.save(ba, "PNG")
+        base64_data = base64.b64encode(ba.data().data()).decode('utf-8')
+        
+        # Insert as HTML
+        html = f'<img src="data:image/png;base64,{base64_data}" />'
+        self.insertHtml(html)
 
 

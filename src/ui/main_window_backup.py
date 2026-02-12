@@ -1,4 +1,4 @@
-import json
+﻿import json
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QDockWidget, QToolBar, 
                              QMessageBox, QLabel)
 from PyQt6.QtGui import QAction, QFont, QIcon
@@ -33,10 +33,6 @@ class MainWindow(QMainWindow):
         self.setup_stealth()
         self.setup_tray() # New Tray Setup
         self.restore_app_state()
-        
-        # Check for updates after 3 seconds
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(3000, self.check_for_updates)
         
     def setup_tray(self):
         from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
@@ -97,12 +93,12 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # Note Action
-        note_act = QAction("📝 + Note", self)
+        note_act = QAction("ðŸ“ + Note", self)
         note_act.triggered.connect(lambda: self.add_note_dock())
         toolbar.addAction(note_act)
 
         # Browser Action
-        browser_act = QAction("🌐 + Browser", self)
+        browser_act = QAction("ðŸŒ + Browser", self)
         browser_act.triggered.connect(lambda: self.add_browser_dock())
         toolbar.addAction(browser_act)
 
@@ -132,7 +128,7 @@ class MainWindow(QMainWindow):
         list_act.triggered.connect(lambda: self.apply_format("list"))
         toolbar.addAction(list_act)
         
-        check_act = QAction("☑ Todo", self)
+        check_act = QAction("â˜‘ Todo", self)
         check_act.triggered.connect(lambda: self.apply_format("checkbox"))
         toolbar.addAction(check_act)
         
@@ -143,20 +139,20 @@ class MainWindow(QMainWindow):
         
         # We can't easily style QAction icon without QIcon. 
         # Just use the unicode char for now.
-        highlight_act = QAction("🖍 Highlight", self)
+        highlight_act = QAction("ðŸ– Highlight", self)
         highlight_act.triggered.connect(lambda: self.apply_format("highlight"))
         toolbar.addAction(highlight_act)
         
         toolbar.addSeparator()
         
         # Image Insert
-        image_act = QAction("📷 Image", self)
+        image_act = QAction("ðŸ“· Image", self)
         image_act.triggered.connect(lambda: self.insert_image_to_active_note())
         toolbar.addAction(image_act)
         
         toolbar.addSeparator()
         
-        search_act = QAction("🔍", self)
+        search_act = QAction("ðŸ”", self)
         search_act.triggered.connect(self.show_find_dialog)
         toolbar.addAction(search_act)
         
@@ -509,42 +505,3 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(flags)
         
         self.show()
-    def check_for_updates(self):
-        """Check GitHub for new releases and show update dialog"""
-        from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
-        from src.core.version import check_for_updates, CURRENT_VERSION
-        
-        # Show loading message
-        self.statusBar().showMessage("Checking for updates...", 3000)
-        
-        has_update, latest_version, download_url, error = check_for_updates()
-        
-        if error:
-            QMessageBox.warning(
-                self,
-                "Update Check Failed",
-                f"Could not check for updates:\n{error}"
-            )
-            return
-        
-        if has_update:
-            reply = QMessageBox.question(
-                self,
-                "Update Available",
-                f"A new version is available!\n\n"
-                f"Current version: {CURRENT_VERSION}\n"
-                f"Latest version: {latest_version}\n\n"
-                f"Would you like to download it?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl(download_url))
-        else:
-            QMessageBox.information(
-                self,
-                "No Updates",
-                f"You are using the latest version ({CURRENT_VERSION})."
-            )
