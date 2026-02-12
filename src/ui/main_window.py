@@ -160,6 +160,20 @@ class MainWindow(QMainWindow):
         search_act.triggered.connect(self.show_find_dialog)
         toolbar.addAction(search_act)
         
+        toolbar.addSeparator()
+        
+        # Opacity Slider (Ghost Mode)
+        from PyQt6.QtWidgets import QSlider
+        opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        opacity_slider.setRange(20, 100) # Min 20% to avoid lost window
+        opacity_slider.setValue(100)
+        opacity_slider.setFixedWidth(100)
+        opacity_slider.setToolTip("Ghost Mode: Adjust Window Opacity")
+        opacity_slider.valueChanged.connect(self.change_window_opacity)
+        toolbar.addWidget(opacity_slider)
+        
+        self.opacity_slider = opacity_slider
+        
         self.setup_menu()
 
     def setup_menu(self):
@@ -179,7 +193,7 @@ class MainWindow(QMainWindow):
         # Help Menu
         help_menu = menubar.addMenu("Help")
         update_act = QAction("Check for Updates", self)
-        update_act.triggered.connect(self.check_for_updates)
+        update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
         help_menu.addAction(update_act)
         
         view_menu.addSeparator()
@@ -469,7 +483,7 @@ class MainWindow(QMainWindow):
             self.activateWindow()
             self.raise_()
 
-    def change_opacity(self, value):
+    def change_window_opacity(self, value):
         opacity = value / 100.0
         self.setWindowOpacity(opacity)
 
@@ -518,42 +532,55 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(flags)
         
         self.show()
-    def check_for_updates(self):
+    def check_for_updates(self, manual=False):
         """Check GitHub for new releases and show update dialog"""
         from PyQt6.QtWidgets import QMessageBox
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
         from src.core.version import check_for_updates, CURRENT_VERSION
         
-        # Show loading message
-        self.statusBar().showMessage("Checking for updates...", 3000)
+        if manual:
+            self.statusBar().showMessage("Checking for updates...", 3000)
         
         has_update, latest_version, download_url, error = check_for_updates()
         
         if error:
-            QMessageBox.warning(
-                self,
-                "Update Check Failed",
-                f"Could not check for updates:\n{error}"
-            )
+            if manual:
+                QMessageBox.warning(self, "Update Check Failed", f"Could not check for updates:\n{error}")
             return
         
         if has_update:
-            reply = QMessageBox.question(
-                self,
-                "Update Available",
-                f"A new version is available!\n\n"
-                f"Current version: {CURRENT_VERSION}\n"
-                f"Latest version: {latest_version}\n\n"
-                f"Would you like to download it?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            # 1. Update Window Title
+            self.setWindowTitle(f"Stealth Assist {CURRENT_VERSION} (🚀 Update v{latest_version} Available!)")
             
-            if reply == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl(download_url))
+            # 2. Add Update Button to Toolbar if not already there
+            if not hasattr(self, 'update_action'):
+                self.update_action = QAction("🚀 Update Now", self)
+                self.update_action.setStyleSheet("background-color: #28a745; color: white; font-weight: bold;") # Style hint
+                self.update_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(download_url)))
+                
+                # Find toolbar and add action
+                toolbar = self.findChild(QToolBar)
+                if toolbar:
+                    toolbar.addSeparator()
+                    toolbar.addAction(self.update_action)
+            
+            if manual:
+                 reply = QMessageBox.question(
+                    self,
+                    "Update Available",
+                    f"A new version is available!\n\n"
+                    f"Current version: {CURRENT_VERSION}\n"
+                    f"Latest version: {latest_version}\n\n"
+                    f"Would you like to download it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                 if reply == QMessageBox.StandardButton.Yes:
+                    QDesktopServices.openUrl(QUrl(download_url))
         else:
-            QMessageBox.information(
-                self,
-                "No Updates",
-                f"You are using the latest version ({CURRENT_VERSION})."
-            )
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "No Updates",
+                    f"You are using the latest version ({CURRENT_VERSION})."
+                )
