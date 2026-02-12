@@ -12,8 +12,6 @@ class NotePane(QTextEdit):
         self.viewport().setMouseTracking(True)
         
         self.setStyleSheet("""
-        
-        self.setStyleSheet("""
             QTextEdit {
                 background-color: #333;
                 color: #eee;
@@ -107,21 +105,88 @@ class NotePane(QTextEdit):
             selection_cursor = self.textCursor()
             selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
             
-            # Check if we selected the right thing (image)
-            if selection_cursor.charFormat().isImageFormat():
-                 fmt = selection_cursor.charFormat().toImageFormat()
-                 fmt.setWidth(new_width)
-                 fmt.setHeight(0) # Maintain aspect ratio
-                 selection_cursor.setCharFormat(fmt)
-            else:
-                 # Try moving Left?
-                 selection_cursor = self.textCursor()
-                 selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-                 if selection_cursor.charFormat().isImageFormat():
-                      fmt = selection_cursor.charFormat().toImageFormat()
-                      fmt.setWidth(new_width)
-                      fmt.setHeight(0)
-                      selection_cursor.setCharFormat(fmt)
+    def resize_image_dialog(self, cursor):
+        from PyQt6.QtWidgets import QInputDialog
+        
+        # 1. Identify valid image cursor
+        # cursorForPosition usually places cursor closest to click.
+        # We need to find WHICH character is the image (Left or Right of cursor).
+        
+        target_cursor = None
+        img_fmt = None
+        
+        # Check Right
+        c_right = self.textCursor()
+        c_right.setPosition(cursor.position())
+        c_right.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+        if c_right.charFormat().isImageFormat():
+            target_cursor = c_right
+            img_fmt = c_right.charFormat().toImageFormat()
+        
+        # Check Left (if Right failed)
+        if not target_cursor:
+            c_left = self.textCursor()
+            c_left.setPosition(cursor.position())
+            c_left.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+            if c_left.charFormat().isImageFormat():
+                target_cursor = c_left
+                img_fmt = c_left.charFormat().toImageFormat()
+                
+        # If still not found, check the cursor's own charFormat (which is "char before")
+        if not target_cursor and cursor.charFormat().isImageFormat():
+             # The cursor is AFTER the image
+             c_left = self.textCursor()
+             c_left.setPosition(cursor.position())
+             c_left.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+             target_cursor = c_left
+             img_fmt = cursor.charFormat().toImageFormat()
+
+        if not target_cursor or not img_fmt:
+            return
+
+        current_width = img_fmt.width()
+        current_height = img_fmt.height()
+        
+        # Load visual image to get aspect ratio if needed
+        name = img_fmt.name()
+        original_image = self.document().resource(3, QUrl(name))
+        
+        # If current size is 0/0, use original
+        native_width = 0
+        native_height = 0
+        if original_image and not original_image.isNull():
+             native_width = original_image.width()
+             native_height = original_image.height()
+        
+        if current_width <= 0:
+             current_width = native_width if native_width > 0 else 300
+        
+        # Show Dialog
+        new_width, ok = QInputDialog.getInt(
+            self, "Resize Image", "Enter new width (px):", 
+            int(current_width), 10, 2000, 10
+        )
+        
+        if ok:
+             # Calculate new height to maintain aspect ratio
+             new_height = 0
+             if native_width > 0 and native_height > 0:
+                  ratio = native_height / native_width
+                  new_height = int(new_width * ratio)
+             elif current_height > 0 and current_width > 0:
+                  ratio = current_height / current_width
+                  new_height = int(new_width * ratio)
+             
+             # Apply
+             img_fmt.setWidth(new_width)
+             if new_height > 0:
+                 img_fmt.setHeight(new_height)
+             else:
+                 img_fmt.setHeight(0) # Fallback to auto
+             
+             # Crucial: Ensure name is preserved (it should be in fmt)
+             # Apply to document
+             target_cursor.setCharFormat(img_fmt)
 
     def reset_image_size(self, cursor):
         # Select image
