@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+StealthAssist.spec
+
+# Installer related
+tools/dist/
+tools/build/
+tools/data.zip
+tools/*.spec
+
+# User data (Sensitive)
+data.json
+*.ini
+.gemini/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environment
+venv/
+ENV/
+env/
+.env

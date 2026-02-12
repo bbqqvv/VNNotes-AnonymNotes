@@ -8,8 +8,7 @@ from src.core.stealth import StealthManager
 from src.core.config import ConfigManager
 from src.features.notes.note_pane import NotePane
 from src.features.browser.browser_pane import BrowserPane
-from src.features.tools.snipper import SnippingWidget
-from src.features.tools.ocr import extract_text_from_pixmap
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -28,8 +27,6 @@ class MainWindow(QMainWindow):
             self.resize(1000, 700)
             
         self.dock_widgets = []
-        self.snipper = SnippingWidget()
-        self.snipper.snippet_captured.connect(self.on_snippet_captured)
         
         self.setup_ui()
         self.setup_stealth()
@@ -74,6 +71,7 @@ class MainWindow(QMainWindow):
             self.toggle_visibility()
 
     def quit_app(self):
+        self.save_app_state() # Ensure save on tray quit
         self.force_quit = True
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
@@ -103,13 +101,6 @@ class MainWindow(QMainWindow):
         browser_act.triggered.connect(lambda: self.add_browser_dock())
         toolbar.addAction(browser_act)
 
-        # Capture Action (New)
-        capture_act = QAction("📸 Capture", self)
-        capture_act.triggered.connect(self.start_capture)
-        toolbar.addAction(capture_act)
-
-        toolbar.addSeparator()
-
         # Formatting
         toolbar.addSeparator()
         
@@ -136,15 +127,50 @@ class MainWindow(QMainWindow):
         list_act.triggered.connect(lambda: self.apply_format("list"))
         toolbar.addAction(list_act)
         
+        check_act = QAction("☑ Todo", self)
+        check_act.triggered.connect(lambda: self.apply_format("checkbox"))
+        toolbar.addAction(check_act)
+        
+        code_act = QAction("</>", self)
+        code_act.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        code_act.triggered.connect(lambda: self.apply_format("code"))
+        toolbar.addAction(code_act)
+        
+        high_act = QAction("🖊", self)
+        # high_act.setStyleSheet("color: yellow; background: #333;") # Error: QAction has no setStyleSheet
+        # We can't easily style QAction icon without QIcon. 
+        # Just use the unicode char for now.
+        high_act.triggered.connect(lambda: self.apply_format("highlight"))
+        toolbar.addAction(high_act)
+        
+        toolbar.addSeparator()
+        
+        search_act = QAction("🔍", self)
+        search_act.triggered.connect(self.show_find_dialog)
+        toolbar.addAction(search_act)
+        
         self.setup_menu()
 
     def setup_menu(self):
         menubar = self.menuBar()
         view_menu = menubar.addMenu("View")
         
-        self.stealth_action = QAction("Stealth Mode", self)
+        # Theme Submenu
+        theme_menu = view_menu.addMenu("Theme")
+        dark_act = QAction("Dark Mode", self)
+        dark_act.triggered.connect(lambda: self.apply_theme("dark"))
+        theme_menu.addAction(dark_act)
+        
+        light_act = QAction("Light Mode", self)
+        light_act.triggered.connect(lambda: self.apply_theme("light"))
+        theme_menu.addAction(light_act)
+        
+        view_menu.addSeparator()
+        
+        self.stealth_action = QAction("Super Stealth (Anti-Capture)", self)
         self.stealth_action.setCheckable(True)
         self.stealth_action.setChecked(True)
+        self.stealth_action.setToolTip("Hides window from Screen Share/Recording (You can still see it)")
         self.stealth_action.setShortcut("Ctrl+Shift+S")
         self.stealth_action.triggered.connect(self.toggle_stealth)
         view_menu.addAction(self.stealth_action)
@@ -156,6 +182,49 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.top_action)
         
         self.toggle_always_on_top(True)
+        self.apply_theme("dark") # Default
+
+    def apply_theme(self, mode):
+        if mode == "dark":
+            style = """
+                QMainWindow, QDockWidget { background: #2b2b2b; color: #eee; }
+                QTextEdit { background: #333; color: #eee; border: none; }
+                QToolBar { background: #222; border-bottom: 1px solid #444; spacing: 5px; }
+                QDockWidget::title { background: #222; padding: 5px; }
+                QMenuBar { background: #222; color: #eee; }
+                QMenuBar::item:selected { background: #444; }
+                QMenu { background: #333; color: #eee; }
+                QMenu::item:selected { background: #555; }
+            """
+        else:
+            style = """
+                QMainWindow, QDockWidget { background: #f5f5f5; color: #000; }
+                QTextEdit { background: #fff; color: #000; border: none; }
+                QToolBar { background: #e0e0e0; border-bottom: 1px solid #ccc; spacing: 5px; }
+                QDockWidget::title { background: #e0e0e0; padding: 5px; }
+                QMenuBar { background: #e0e0e0; color: #000; }
+                QMenuBar::item:selected { background: #ccc; }
+                QMenu { background: #fff; color: #000; }
+                QMenu::item:selected { background: #ddd; }
+            """
+        self.setStyleSheet(style)
+        
+        # Propagate to panes if needed
+        for dock in self.dock_widgets:
+            widget = dock.widget()
+            if isinstance(widget, NotePane):
+                # NotePane has its own styleSheet in __init__, we might need to override it 
+                # or make sure global style applies.
+                # Global style usually applies if local not strictly set.
+                # Let's force update or reset NotePane style.
+                if mode == "dark":
+                     widget.setStyleSheet("""
+                        QTextEdit { background-color: #333; color: #eee; font-family: 'Segoe UI'; font-size: 14px; border: none; padding: 10px; }
+                     """)
+                else:
+                     widget.setStyleSheet("""
+                        QTextEdit { background-color: #fff; color: #000; font-family: 'Segoe UI'; font-size: 14px; border: none; padding: 10px; }
+                     """)
 
     def add_note_dock(self, content="", title=None, obj_name=None):
         count = len(self.dock_widgets) + 1
@@ -247,89 +316,28 @@ class MainWindow(QMainWindow):
         dock.destroyed.connect(lambda: self.dock_widgets.remove(dock) if dock in self.dock_widgets else None)
         return dock
 
-    def start_capture(self):
-        self.snipper.start_snip()
 
-    def on_snippet_captured(self, pixmap):
-        from PyQt6.QtGui import QGuiApplication
-        
-        # 1. OCR
-        success, text = extract_text_from_pixmap(pixmap)
-        
-        # 2. Copy Image to Clipboard
-        cb = QGuiApplication.clipboard()
-        cb.setPixmap(pixmap)
-        
-        msg = "Image copied."
-        if success and text:
-             # 3. Copy Text to Clipboard (Priority for pasting into search?)
-             # Actually, if we set text, it might override image or vice versa in some clipboards.
-             # Usually we can set mime data with both.
-             # But for browser search, Text is king.
-             cb.setText(text)
-             msg = f"Extracted {len(text)} chars & Copied!"
-        elif not success:
-             msg = f"OCR Failed: {text}"
-             
-        # Toast / Status
-        # self.statusBar().showMessage(msg, 3000) 
-        # We don't have StatusBar enabled? check.
-        # Let's just print or maybe use a specialized Toast if we had one.
-        # For now, maybe just a tooltip or simple console log since we want stealth.
-        print(msg)
 
-    def restore_app_state(self):
-        # 1. Restore Geometry
-        geo = self.config.get_value("window/geometry")
-        if geo:
-            try:
-                self.restoreGeometry(bytes.fromhex(geo))
-            except Exception:
-                pass
+    # ... setup_stealth ...
 
-        # 2. Restore Notes
-        notes_data = self.config.get_value("notes/docks_content")
-        if notes_data:
-            try:
-                data_list = json.loads(notes_data)
-                for item in data_list:
-                    dock = self.add_note_dock(title=item.get("title", "Note"), 
-                                              obj_name=item.get("obj_name"))
-                    if dock and dock.widget():
-                        dock.widget().setHtml(item.get("content", ""))
-            except Exception:
-                pass
-
-        # 3. Restore Browsers
-        browser_data = self.config.get_value("browser/docks_content")
-        if browser_data:
-            try:
-                data_list = json.loads(browser_data)
-                for item in data_list:
-                    dock = self.add_browser_dock(title=item.get("title", "Browser"),
-                                                 obj_name=item.get("obj_name"))
-                    if dock and dock.widget():
-                        dock.widget().load_url(item.get("url", "https://google.com"))
-            except Exception:
-                pass
-
-        # 4. Restore Dock Layout State
-        state = self.config.get_value("window/dock_state")
-        if state:
-            self.restoreState(state)
-
-    def closeEvent(self, event):
-        # Save Geometry & State
+    def save_app_state(self):
+        # 1. Config (INI) - Layout & Geometry
         self.config.set_value("window/geometry", self.saveGeometry())
         self.config.set_value("window/dock_state", self.saveState())
         
-        # Save Content
+        # 2. Data (JSON) - Content
+        from src.core.storage import StorageManager
+        storage = StorageManager()
+        
         notes_data = []
         browser_data = []
-        ai_open = "false"
         
         for dock in self.dock_widgets:
-            if not dock.isVisible(): continue 
+            # Save even if hidden, so we don't lose data of closed docks if we wanted to persist them?
+            # Actually, if user closed it, maybe they want it gone. 
+            # But "stealth" app usually persists everything. 
+            # Let's save all valid docks in the list.
+            if not dock.widget(): continue
             
             widget = dock.widget()
             if isinstance(widget, NotePane):
@@ -344,9 +352,52 @@ class MainWindow(QMainWindow):
                     "title": dock.windowTitle(),
                     "url": widget.browser.url().toString()
                 })
+                
+        full_data = {
+            "notes": notes_data,
+            "browsers": browser_data,
+            "theme": "dark" # TODO: track actual theme state
+        }
         
-        self.config.set_value("notes/docks_content", json.dumps(notes_data))
-        self.config.set_value("browser/docks_content", json.dumps(browser_data))
+        storage.save_data(full_data)
+
+    def restore_app_state(self):
+        # 1. Load Data (JSON)
+        from src.core.storage import StorageManager
+        storage = StorageManager()
+        data = storage.load_data()
+        
+        # Restore Notes
+        notes_list = data.get("notes", [])
+        for item in notes_list:
+            dock = self.add_note_dock(title=item.get("title", "Note"), 
+                                      obj_name=item.get("obj_name"))
+            if dock and dock.widget():
+                dock.widget().setHtml(item.get("content", ""))
+                
+        # Restore Browsers
+        browser_list = data.get("browsers", [])
+        for item in browser_list:
+            dock = self.add_browser_dock(title=item.get("title", "Browser"),
+                                         obj_name=item.get("obj_name"))
+            if dock and dock.widget():
+                dock.widget().load_url(item.get("url", "https://google.com"))
+
+        # 2. Restore Layout & Geometry (INI)
+        # MUST be done AFTER adding docks, otherwise restoreState won't find the docks to place.
+        geo = self.config.get_value("window/geometry")
+        if geo:
+            try:
+                self.restoreGeometry(bytes.fromhex(geo))
+            except Exception:
+                pass
+                
+        state = self.config.get_value("window/dock_state")
+        if state:
+            self.restoreState(state)
+
+    def closeEvent(self, event):
+        self.save_app_state()
         
         if getattr(self, "force_quit", False):
             QMainWindow.closeEvent(self, event)
@@ -403,6 +454,26 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Stealth Enabled", 2000)
         else:
             self.statusBar().showMessage("Stealth Disabled", 2000)
+
+    def show_find_dialog(self):
+        if not self.active_pane:
+            return
+            
+        from PyQt6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, "Find in Note", "Search text:")
+        if ok and text:
+             # Find in active pane (QTextEdit)
+             # QTextEdit.find() returns bool
+             found = self.active_pane.find(text)
+             if not found:
+                 # Try from beginning
+                 # Move cursor to start
+                 from PyQt6.QtGui import QTextCursor
+                 start_cursor = self.active_pane.textCursor()
+                 start_cursor.movePosition(QTextCursor.MoveOperation.Start)
+                 self.active_pane.setTextCursor(start_cursor)
+                 if not self.active_pane.find(text):
+                      self.statusBar().showMessage(f"'{text}' not found.", 2000)
 
     def toggle_always_on_top(self, checked):
         flags = self.windowFlags()
