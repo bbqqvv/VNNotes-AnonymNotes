@@ -9,11 +9,20 @@ Sử dụng công nghệ `SetWindowDisplayAffinity`, ứng dụng sẽ hoàn to�
 
 ### 2. 📝 Power Notes
 -   Hỗ trợ đầy đủ định dạng văn bản (Bold, Italic, Underline).
--   Chèn hình ảnh trực tiếp từ Clipboard và kéo thả để thay đổi kích thước.
+-   **Image Handling (v1.5)**:
+    -   Double-click để thay đổi kích thước ảnh chính xác.
+    -   Kéo & thả (Drag & Drop) để di chuyển ảnh/văn bản.
+    -   Menu chuột phải: Resize, Reset Size, Lưu ảnh, Căn chỉnh (Trái/Giữa/Phải).
 -   **Checkboxes (Todo list)**: Click trực tiếp để đánh dấu hoàn thành.
 -   **Code Blocks**: Định dạng code chuyên nghiệp với font Monospace và nền tối.
 -   **Highlighter**: Làm nổi bật các đoạn văn bản quan trọng.
 -   **Internal Search**: Tìm kiếm nhanh nội dung trong note bằng `Ctrl+F`.
+
+### 🚀 Cập nhật Mới (v1.5.1)
+-   **Tự động cập nhật**: Kiểm tra phiên bản mới từ GitHub khi khởi động.
+-   **Full Màn Hình**: Ứng dụng tự động tối ưu không gian làm việc.
+-   **Icon Chuẩn**: Sửa lỗi hiển thị icon trên thanh tiêu đề.
+-   **Sửa lỗi**: Cải thiện độ ổn định khi resize và di chuyển ảnh.
 
 ### 3. 🌐 Mini Browser
 Trình duyệt web tích hợp nhỏ gọn dạng Docking, giúp bạn tra cứu nhanh mà không cần chuyển Tab rườm rà.
