@@ -240,7 +240,16 @@ class MainWindow(QMainWindow):
                      """)
                 else:
                      widget.setStyleSheet("""
-                        QTextEdit { background-color: #fff; color: #000; font-family: 'Segoe UI'; font-size: 14px; border: none; padding: 10px; }
+                        QTextEdit { 
+                            background-color: #ffffff; 
+                            color: #000000; 
+                            font-family: 'Segoe UI'; 
+                            font-size: 14px; 
+                            border: none; 
+                            padding: 10px; 
+                            selection-background-color: #0078d7;
+                            selection-color: #ffffff;
+                        }
                      """)
 
     def add_note_dock(self, content="", title=None, obj_name=None):

@@ -40,14 +40,17 @@ class NotePane(QTextEdit):
         if self.resizing_image and self.resize_cursor:
             delta = event.pos() - self.resize_start_pos
             # Calculate new size
-            new_width = max(10, self.resize_orig_size.width() + delta.x())
+            new_width = max(50, self.resize_orig_size.width() + delta.x())
             
             # Update Image Format
-            fmt = self.resize_cursor.charFormat().toImageFormat()
-            fmt.setWidth(new_width)
-            fmt.setHeight(0) 
-            
-            self.resize_cursor.setCharFormat(fmt)
+            # We must get the format from the CURRENT selection (which uses resize_cursor)
+            # But we need to make sure we are modifying the image format
+            if self.resize_cursor.hasSelection():
+                fmt = self.resize_cursor.charFormat().toImageFormat()
+                if fmt.isValid():
+                    fmt.setWidth(new_width)
+                    fmt.setHeight(0) # Keep aspect ratio
+                    self.resize_cursor.setCharFormat(fmt)
             return
 
         # 2. Handle Hover (Cursor Change)
@@ -94,13 +97,18 @@ class NotePane(QTextEdit):
                      self.resizing_image = True
                      self.resize_start_pos = event.pos()
                      
-                     # Select the image so setCharFormat applies to it
-                     # Cursor is after the image (since hitting bottom-right)
-                     selection_cursor = QTextCursor(cursor)
+                     # Key fix: Set the text cursor to be the one at the mouse position
+                     # This ensures we are operating on the correct image
+                     self.setTextCursor(cursor)
+                     
+                     # Now select the image. Since we clicked bottom-right, the cursor is AFTER the image.
+                     # We move LEFT, keeping anchor, to select it.
+                     selection_cursor = self.textCursor()
                      selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+                     self.setTextCursor(selection_cursor) # Apply selection
+                     
                      self.resize_cursor = selection_cursor
                      
-                     img_fmt = fmt.toImageFormat()
                      self.resize_orig_size = rect.size()
                      return # Consume event
 
