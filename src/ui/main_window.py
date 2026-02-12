@@ -15,7 +15,21 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.setWindowTitle("Stealth Assist")
-        self.setWindowIcon(QIcon("appnote.png"))
+        import os
+        import sys
+        
+        # Determine base path (handle PyInstaller vs Source)
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            # Go up two levels from src/ui to project root
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            
+        icon_path = os.path.join(base_path, "appnote.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        else:
+            print(f"Warning: Icon not found at {icon_path}")
         
         # Load Geometry
         geo = self.config.get_value("window/geometry")
@@ -25,7 +39,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         else:
-            self.resize(1200, 800)
+            self.setWindowState(Qt.WindowState.WindowMaximized)
             
         self.dock_widgets = []
         

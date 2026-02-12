@@ -11,7 +11,7 @@ class NotePane(QTextEdit):
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
-        self.setDragEnabled(True) # Enable dragging text/images
+        # self.setDragEnabled(True) # QTextEdit doesn't have this, it handles dnd internally
         
         self.setStyleSheet("""
             QTextEdit {
