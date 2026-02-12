@@ -22,7 +22,7 @@ def make_installer():
     ]
     
     for relative_path in to_remove:
-        path = os.path.join(dist_dir, "_internal", relative_path)
+        path = os.path.join(dist_dir, "libs", relative_path)
         if os.path.exists(path):
             print(f"   Removing: {relative_path}")
             if os.path.isdir(path):
