@@ -9,11 +9,9 @@ class NotePane(QTextEdit):
         super().__init__(parent)
         self.setPlaceholderText("Type notes here... (Paste images supported)")
         self.setMouseTracking(True) 
-        self.viewport().setMouseTracking(True) # Important for QTextEdit
-        self.resizing_image = False
-        self.resize_start_pos = None
-        self.resize_orig_size = None
-        self.resize_cursor = None
+        self.viewport().setMouseTracking(True)
+        
+        self.setStyleSheet("""
         
         self.setStyleSheet("""
             QTextEdit {
@@ -35,138 +33,131 @@ class NotePane(QTextEdit):
 
     # ... Formatting methods ...
 
-    def mouseMoveEvent(self, event):
-        # 1. Handle Resizing
-        if self.resizing_image and self.resize_cursor:
-            delta = event.pos() - self.resize_start_pos
-            # Calculate new size
-            new_width = max(50, self.resize_orig_size.width() + delta.x())
-            
-            # Update Image Format
-            # We must get the format from the CURRENT selection (which uses resize_cursor)
-            # But we need to make sure we are modifying the image format
-            if self.resize_cursor.hasSelection():
-                fmt = self.resize_cursor.charFormat().toImageFormat()
-                if fmt.isValid():
-                    fmt.setWidth(new_width)
-                    fmt.setHeight(0) # Keep aspect ratio
-                    self.resize_cursor.setCharFormat(fmt)
-            return
-
-        # 2. Handle Hover (Cursor Change)
-        cursor = self.cursorForPosition(event.pos())
-        fmt = cursor.charFormat()
-        
-        if fmt.isImageFormat():
-            # Get Rect of the image
-            rect = self.cursorRect(cursor)
-            # Check if near bottom-right
-            bn_right = rect.bottomRight()
-            dist = (bn_right - event.pos()).manhattanLength()
-            
-            if dist < 30:
-                 self.viewport().setCursor(Qt.CursorShape.SizeFDiagCursor)
-            else:
-                 self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
-        else:
-            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
-            
-        super().mouseMoveEvent(event)
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+             cursor = self.cursorForPosition(event.pos())
+             fmt = cursor.charFormat()
+             if fmt.isImageFormat():
+                 self.resize_image_dialog(cursor)
+                 return
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # 1. Check for Checkbox Click
+            # Check for Checkbox Click
             cursor = self.cursorForPosition(event.pos())
-            # Select the character after the cursor position
             cursor.movePosition(cursor.MoveOperation.Right, cursor.MoveMode.KeepAnchor)
             char = cursor.selectedText()
             
             if char in ["☐", "☑"]:
-                # Toggle
                 new_char = "☑" if char == "☐" else "☐"
                 cursor.insertText(new_char)
-                return # Consume event
-                
-            # 2. Check for Image Resize Start
-            cursor = self.cursorForPosition(event.pos()) # Reset cursor
-            fmt = cursor.charFormat()
-            if fmt.isImageFormat():
-                 rect = self.cursorRect(cursor)
-                 bn_right = rect.bottomRight()
-                 if (bn_right - event.pos()).manhattanLength() < 30:
-                     self.resizing_image = True
-                     self.resize_start_pos = event.pos()
-                     
-                     # 1. Correct selection logic
-                     self.setTextCursor(cursor)
-                     selection_cursor = self.textCursor()
-                     selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-                     self.setTextCursor(selection_cursor)
-                     self.resize_cursor = selection_cursor
-                     
-                     # 2. Correct size retrieval logic
-                     img_fmt = fmt.toImageFormat()
-                     current_width = img_fmt.width()
-                     current_height = img_fmt.height()
-
-                     if current_width > 0:
-                         # Use existing resized width
-                         from PyQt6.QtCore import QSize
-                         self.resize_orig_size = QSize(int(current_width), int(current_height) if current_height > 0 else 0)
-                     else:
-                         # Width is 0 or -1 (default). Need to get NATURAL size from Image Resource.
-                         name = img_fmt.name()
-                         doc = self.document()
-                         # Resources are stored in document by name (url)
-                         # But wait, we used base64 data URI.
-                         # PyQt handles base64 URIs internally but referencing them back is tricky.
-                         # Alternative: Select the images and get the fragment.
-                         
-                         # Easier way: The cursor with selection logic actually selects an image char.
-                         # But getting the QImage object from char format is not direct for external images.
-                         # However, since we inserted base64, the "name" IS the data URI in older Qt, or internally managed.
-                         
-                         # Best approach for reliability:
-                         # Let's trust the rect logic BUT only if we are actually over the image?
-                         # Issue with cursorRect(cursor) is that it gives the cursor position, not the image rect.
-                         # The image rect is obtained differently.
-                         
-                         # Let's try image_interface logic 
-                         # Actually, cursorRect(selection_cursor) might work better if we have selection?
-                         # No, cursorRect returns the rect of the cursor itself.
-                         
-                         # Let's look at how we get the rect for hit testing.
-                         # 'rect' variable from above:
-                         # rect = self.cursorRect(cursor) -> This was the buggy part.
-                         
-                         # CORRECT WAY to get Image Rect:
-                         # We need to iterate blocks or use document layout.
-                         # But a simpler hack for resize dragging:
-                         # We only need the WIDTH. If it's unset, it's the full width of the view usually?
-                         # No, it's the image width.
-                         
-                         # Attempt to load the image from the resource name if possible
-                         image = doc.resource(3, QUrl(name)) # 3 = QTextDocument.ImageResource
-                         if image and not image.isNull():
-                              self.resize_orig_size = image.size()
-                         else:
-                              # Fallback to a reasonable default or try to get it from layout
-                              # If we can't find it, start at 300?
-                              from PyQt6.QtCore import QSize
-                              self.resize_orig_size = QSize(200, 200)
-
-                     return # Consume event
+                return 
 
         super().mousePressEvent(event)
 
-    def mouseReleaseEvent(self, event):
-        if self.resizing_image:
-            self.resizing_image = False
-            self.resize_cursor = None
-            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
-            return
+    def contextMenuEvent(self, event):
+        # Create standard menu first
+        menu = self.createStandardContextMenu()
+        
+        # Check if cursor is on image
+        cursor = self.cursorForPosition(event.pos())
+        fmt = cursor.charFormat()
+        
+        if fmt.isImageFormat():
+            menu.addSeparator()
             
-        super().mouseReleaseEvent(event)
+            resize_act = menu.addAction("🖼️ Resize Image...")
+            resize_act.triggered.connect(lambda: self.resize_image_dialog(cursor))
+            
+            reset_act = menu.addAction("🔄 Reset Size")
+            reset_act.triggered.connect(lambda: self.reset_image_size(cursor))
+            
+            save_act = menu.addAction("💾 Save Image As...")
+            save_act.triggered.connect(lambda: self.save_image_as(cursor))
+            
+        menu.exec(event.globalPos())
+
+    def resize_image_dialog(self, cursor):
+        from PyQt6.QtWidgets import QInputDialog
+        
+        fmt = cursor.charFormat().toImageFormat()
+        current_width = fmt.width()
+        
+        # If width is 0, it means original size. Try to get it.
+        if current_width == 0:
+             # Try to get native size
+             name = fmt.name()
+             image = self.document().resource(3, QUrl(name))
+             if image and not image.isNull():
+                 current_width = image.width()
+             else:
+                 current_width = 300 # Default fallback
+        
+        new_width, ok = QInputDialog.getInt(
+            self, "Resize Image", "Enter new width (px):", 
+            int(current_width), 10, 2000, 10
+        )
+        
+        if ok:
+            # Apply new width
+            # We need to make sure we apply it to the image at cursor
+            # Select the image char
+            self.setTextCursor(cursor)
+            selection_cursor = self.textCursor()
+            selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            
+            # Check if we selected the right thing (image)
+            if selection_cursor.charFormat().isImageFormat():
+                 fmt = selection_cursor.charFormat().toImageFormat()
+                 fmt.setWidth(new_width)
+                 fmt.setHeight(0) # Maintain aspect ratio
+                 selection_cursor.setCharFormat(fmt)
+            else:
+                 # Try moving Left?
+                 selection_cursor = self.textCursor()
+                 selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+                 if selection_cursor.charFormat().isImageFormat():
+                      fmt = selection_cursor.charFormat().toImageFormat()
+                      fmt.setWidth(new_width)
+                      fmt.setHeight(0)
+                      selection_cursor.setCharFormat(fmt)
+
+    def reset_image_size(self, cursor):
+        # Select image
+        self.setTextCursor(cursor)
+        selection_cursor = self.textCursor()
+        selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+        
+        if not selection_cursor.charFormat().isImageFormat():
+             selection_cursor = self.textCursor()
+             selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+        
+        if selection_cursor.charFormat().isImageFormat():
+             fmt = selection_cursor.charFormat().toImageFormat()
+             fmt.setWidth(0) # 0 means native size in Qt
+             fmt.setHeight(0)
+             selection_cursor.setCharFormat(fmt)
+
+    def save_image_as(self, cursor):
+        from PyQt6.QtWidgets import QFileDialog
+        
+        fmt = cursor.charFormat().toImageFormat()
+        name = fmt.name()
+        
+        # Retrieve image data
+        image = self.document().resource(3, QUrl(name))
+        
+        if isinstance(image, float): # Sometimes returns garbage if not found?
+             return
+             
+        if image and not image.isNull():
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Image", "image.png", "Images (*.png *.jpg)"
+            )
+            
+            if file_path:
+                image.save(file_path)
 
     def apply_format(self, fmt_type):
         cursor = self.textCursor()
