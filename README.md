@@ -19,10 +19,21 @@ Sử dụng công nghệ `SetWindowDisplayAffinity`, ứng dụng sẽ hoàn to�
 -   **Internal Search**: Tìm kiếm nhanh nội dung trong note bằng `Ctrl+F`.
 
 ### 🚀 Cập nhật Mới (v1.5.1)
--   **Tự động cập nhật**: Kiểm tra phiên bản mới từ GitHub khi khởi động.
--   **Full Màn Hình**: Ứng dụng tự động tối ưu không gian làm việc.
--   **Icon Chuẩn**: Sửa lỗi hiển thị icon trên thanh tiêu đề.
--   **Sửa lỗi**: Cải thiện độ ổn định khi resize và di chuyển ảnh.
+
+### 🔄 Auto-Update & System
+- **Tự động cập nhật**: Kiểm tra và thông báo phiên bản mới từ GitHub khi mở app.
+- **Full Màn Hình**: Ứng dụng tự động tối ưu không gian làm việc ngay khi khởi động.
+- **Icon Chuẩn**: Logo AppNote hiển thị chính xác trên thanh tiêu đề và Taskbar.
+
+### 🖼️ Image Support in Notes (v1.5)
+- **Căn Chỉnh (Alignment)**: Chuột phải vào ảnh để căn Trái, Giữa, Phải.
+- **Kéo & Thả (Drag & Drop)**: Di chuyển ảnh và văn bản dễ dàng bằng cách kéo thả.
+- **Resize Thông Minh**: Double-click vào ảnh để nhập kích thước chính xác (thay thế kéo thả cũ).
+- **Context Menu**: Menu chuột phải đầy đủ tính năng cho ảnh.
+
+### 🛠️ Improvements
+- Tối ưu hóa dung lượng bộ cài đặt (Cấu trúc `libs` gọn gàng).
+- Cải thiện độ mượt mà khi soạn thảo ghi chú.
 
 ### 3. 🌐 Mini Browser
 Trình duyệt web tích hợp nhỏ gọn dạng Docking, giúp bạn tra cứu nhanh mà không cần chuyển Tab rườm rà.
