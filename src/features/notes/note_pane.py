@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtGui import QFont, QTextListFormat, QTextCursor
+from PyQt6.QtGui import QFont, QTextListFormat, QTextCursor, QTextBlockFormat
 from PyQt6.QtCore import pyqtSignal, Qt, QUrl
 
 class NotePane(QTextEdit):
@@ -22,10 +22,14 @@ class NotePane(QTextEdit):
         from PyQt6.QtGui import QImage
         from PyQt6.QtCore import QUrl
         
-        # Regex to find data URIs
-        pattern = r'src="data:image/(?P<ext>[^;]+);base64,(?P<data>[^"]+)"'
+        # Regex to find data URIs. Mammoth usually produces double-quoted src.
+        # Pattern handles data:image/ext;base64,...
+        # Regex to find data URIs. Support both " and ' and any additional attributes.
+        pattern = r'src=["\']data:image/(?P<ext>[^;]+);base64,(?P<data>[^"\']+)["\']'
         
         index = 0
+        doc = self.document()
+        
         def replace_match(match):
             nonlocal index
             ext = match.group('ext')
@@ -39,7 +43,7 @@ class NotePane(QTextEdit):
                 if not image.isNull():
                     # 2. Add as internal resource (ResourceType 3 = Image)
                     res_name = f"word_img_{index}.{ext}"
-                    self.document().addResource(3, QUrl(res_name), image)
+                    doc.addResource(3, QUrl(res_name), image)
                     index += 1
                     # 3. Return new internal src
                     return f'src="{res_name}"'
@@ -69,12 +73,14 @@ class NotePane(QTextEdit):
         if event.button() == Qt.MouseButton.LeftButton:
             # Check for Checkbox Click
             cursor = self.cursorForPosition(event.pos())
-            cursor.movePosition(cursor.MoveOperation.Right, cursor.MoveMode.KeepAnchor)
-            char = cursor.selectedText()
+            # Peek right
+            test_cursor = QTextCursor(cursor)
+            test_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            char = test_cursor.selectedText()
             
             if char in ["☐", "☑"]:
                 new_char = "☑" if char == "☐" else "☐"
-                cursor.insertText(new_char)
+                test_cursor.insertText(new_char)
                 return 
 
         super().mousePressEvent(event)
@@ -153,11 +159,11 @@ class NotePane(QTextEdit):
             
             align_menu = menu.addMenu("📏 Alignment")
             align_left = align_menu.addAction("⬅️ Align Left")
-            align_left.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignLeft))
+            align_left.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignLeft))
             align_center = align_menu.addAction("⏺️ Align Center")
-            align_center.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignCenter))
+            align_center.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignCenter))
             align_right = align_menu.addAction("➡️ Align Right")
-            align_right.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignRight))
+            align_right.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignRight))
             
             menu.addSeparator()
             resize_act = menu.addAction("🖼️ Resize Image...")
@@ -169,12 +175,13 @@ class NotePane(QTextEdit):
             
         menu.exec(event.globalPos())
 
-    def set_image_alignment(self, cursor, alignment):
-        block_cursor = QTextCursor(cursor)
-        from PyQt6.QtGui import QTextBlockFormat
+    def apply_alignment(self, alignment):
+        """Applies alignment to the current block(s)."""
         block_fmt = QTextBlockFormat()
         block_fmt.setAlignment(alignment)
-        block_cursor.mergeBlockFormat(block_fmt)
+        cursor = self.textCursor()
+        cursor.mergeBlockFormat(block_fmt)
+        self.setFocus()
 
     def resize_image_dialog(self, cursor):
         from PyQt6.QtWidgets import QInputDialog
@@ -182,14 +189,12 @@ class NotePane(QTextEdit):
         img_fmt = None
         
         if cursor.charFormat().isImageFormat():
-            target_cursor = self.textCursor()
-            target_cursor.setPosition(cursor.position())
+            target_cursor = QTextCursor(cursor)
             target_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
             img_fmt = cursor.charFormat().toImageFormat()
             
         if not target_cursor:
-            c_right = self.textCursor()
-            c_right.setPosition(cursor.position())
+            c_right = QTextCursor(cursor)
             c_right.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
             if c_right.charFormat().isImageFormat():
                 target_cursor = c_right
@@ -247,6 +252,7 @@ class NotePane(QTextEdit):
     def apply_format(self, fmt_type):
         cursor = self.textCursor()
         fmt = cursor.charFormat()
+        
         if fmt_type == "bold":
             fmt.setFontWeight(QFont.Weight.Bold if fmt.fontWeight() != QFont.Weight.Bold else QFont.Weight.Normal)
             cursor.mergeCharFormat(fmt)
@@ -274,6 +280,16 @@ class NotePane(QTextEdit):
                 fmt.setBackground(QColor("yellow"))
                 fmt.setForeground(QColor("black"))
             cursor.mergeCharFormat(fmt)
+        # Alignment
+        elif fmt_type == "align-left":
+            self.apply_alignment(Qt.AlignmentFlag.AlignLeft)
+        elif fmt_type == "align-center":
+            self.apply_alignment(Qt.AlignmentFlag.AlignCenter)
+        elif fmt_type == "align-right":
+            self.apply_alignment(Qt.AlignmentFlag.AlignRight)
+        elif fmt_type == "align-justify":
+            self.apply_alignment(Qt.AlignmentFlag.AlignJustify)
+            
         self.setFocus()
         
     def canInsertFromMimeData(self, source):

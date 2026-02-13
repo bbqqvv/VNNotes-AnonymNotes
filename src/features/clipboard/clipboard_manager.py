@@ -34,3 +34,14 @@ class ClipboardManager(QObject):
 
     def get_history(self):
         return self.history
+
+    def remove_item(self, text):
+        """Removes a specific item from history."""
+        if text in self.history:
+            self.history.remove(text)
+            self.history_updated.emit(self.history)
+
+    def clear_history(self):
+        """Clears all clipboard history."""
+        self.history = []
+        self.history_updated.emit(self.history)

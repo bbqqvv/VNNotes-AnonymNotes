@@ -85,7 +85,10 @@ class MainWindow(QMainWindow):
         if isinstance(autosave_enabled, str):
             autosave_enabled = autosave_enabled.lower() == 'true'
             
-        self.autosave_act.setChecked(autosave_enabled)
+        autosave_act = self.menu_manager.actions.get("autosave")
+        if autosave_act:
+            autosave_act.setChecked(autosave_enabled)
+            
         if autosave_enabled:
             self.autosave_timer.start()
 
@@ -136,185 +139,13 @@ class MainWindow(QMainWindow):
         self.apply_theme("dark")
 
     def setup_actions(self):
-        # Tools
-        self.note_act = QAction(self._get_icon("note.svg"), "Note", self)
-        self.note_act.setShortcut("Ctrl+N")
-        self.note_act.triggered.connect(lambda: self.add_note_dock())
-
-        self.browser_act = QAction(self._get_icon("browser.svg"), "Browser", self)
-        self.browser_act.setShortcut("Ctrl+Shift+B")
-        self.browser_act.triggered.connect(lambda: self.add_browser_dock())
-
-        self.tele_act = QAction(self._get_icon("teleprompter.svg"), "Prompter", self)
-        self.tele_act.setShortcut("Ctrl+Shift+P")
-        self.tele_act.triggered.connect(self.open_teleprompter)
-
-        self.open_act = QAction(self._get_icon("folder-open.svg"), "Open File", self)
-        self.open_act.setShortcut("Ctrl+O")
-        self.open_act.triggered.connect(self.open_file_dialog)
-
-        self.clipboard_act = QAction(self._get_icon("clipboard.svg"), "Clipboard", self)
-        self.clipboard_act.setShortcut("Ctrl+Shift+V")
-        self.clipboard_act.triggered.connect(self.add_clipboard_dock)
-
-        self.save_act = QAction(self._get_icon("save.svg"), "Save", self)
-        self.save_act.setShortcut("Ctrl+S")
-        self.save_act.triggered.connect(self.save_current_work)
-
-        # Formatting
-        self.bold_act = QAction(self._get_icon("bold.svg"), "Bold", self)
-        self.bold_act.setShortcut("Ctrl+B")
-        self.bold_act.triggered.connect(lambda: self.apply_format("bold"))
-
-        self.italic_act = QAction(self._get_icon("italic.svg"), "Italic", self)
-        self.italic_act.setShortcut("Ctrl+I")
-        self.italic_act.triggered.connect(lambda: self.apply_format("italic"))
-
-        self.underline_act = QAction(self._get_icon("underline.svg"), "Underline", self)
-        self.underline_act.setShortcut("Ctrl+U")
-        self.underline_act.triggered.connect(lambda: self.apply_format("underline"))
-
-        self.list_act = QAction(self._get_icon("list.svg"), "List", self)
-        self.list_act.setShortcut("Ctrl+Shift+L")
-        self.list_act.triggered.connect(lambda: self.apply_format("list"))
-
-        self.check_act = QAction(self._get_icon("check.svg"), "Task", self)
-        self.check_act.setShortcut("Ctrl+Shift+C")
-        self.check_act.triggered.connect(lambda: self.apply_format("checkbox"))
-
-        self.code_act = QAction(self._get_icon("code.svg"), "Code", self)
-        self.code_act.setShortcut("Ctrl+Shift+K")
-        self.code_act.triggered.connect(lambda: self.apply_format("code"))
-
-        self.highlight_act = QAction(self._get_icon("highlight.svg"), "Highlight", self)
-        self.highlight_act.setShortcut("Ctrl+H")
-        self.highlight_act.triggered.connect(lambda: self.apply_format("highlight"))
-
-        self.image_act = QAction(self._get_icon("image.svg"), "Image", self)
-        self.image_act.setShortcut("Ctrl+Shift+I")
-        self.image_act.triggered.connect(self.insert_image_to_active_note)
-
-        self.search_act = QAction(self._get_icon("search.svg"), "Find", self)
-        self.search_act.setShortcut("Ctrl+F")
-        self.search_act.triggered.connect(self.show_find_dialog)
-
-        self.rename_act = QAction("Rename Note", self)
-        self.rename_act.setShortcut("Ctrl+R")
-        self.rename_act.triggered.connect(self.rename_active_note)
-
-        # Stealth Actions
-
-        self.stealth_action = QAction("Super Stealth (Anti-Capture)", self)
-        self.stealth_action.setCheckable(True)
-        self.stealth_action.setChecked(True)
-        self.stealth_action.setShortcut("Ctrl+Shift+S")
-        self.stealth_action.triggered.connect(self.toggle_stealth)
-
-        self.top_action = QAction("Always on Top", self)
-        self.top_action.setCheckable(True)
-        self.top_action.setChecked(True)
-        self.top_action.triggered.connect(self.toggle_always_on_top)
-
-        self.ghost_click_act = QAction("Ghost Click (Click-Through)", self)
-        self.ghost_click_act.setCheckable(True)
-        self.ghost_click_act.setShortcut("Ctrl+Shift+F9")
-        self.ghost_click_act.triggered.connect(self.toggle_ghost_click)
-
-        self.autosave_act = QAction("Auto-Save", self)
-        self.autosave_act.setCheckable(True)
-        self.autosave_act.setChecked(True) # Default on
-        self.autosave_act.triggered.connect(self.toggle_autosave)
+        self.menu_manager.setup_actions()
 
     def setup_toolbar(self):
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setMovable(False)
-        toolbar.setFloatable(False)
-        toolbar.setIconSize(QSize(20, 20))
-        self.addToolBar(toolbar)
-
-        toolbar.addAction(self.note_act)
-        toolbar.addAction(self.browser_act)
-        toolbar.addAction(self.tele_act)
-        toolbar.addAction(self.open_act)
-        toolbar.addAction(self.clipboard_act)
-        toolbar.addAction(self.image_act)
-
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
-
-        toolbar.addAction(self.search_act)
-        toolbar.addSeparator()
-
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(20, 100)
-        self.opacity_slider.setValue(100)
-        self.opacity_slider.setFixedWidth(80)
-        self.opacity_slider.valueChanged.connect(self.change_window_opacity)
-        toolbar.addWidget(self.opacity_slider)
-
-        self.label_ghost = QLabel()
-        self.label_ghost.setPixmap(self._get_icon("ghost.svg").pixmap(16, 16))
-        toolbar.addWidget(self.label_ghost)
+        self.menu_manager.setup_toolbar()
 
     def setup_menu(self):
-        menubar = self.menuBar()
-        
-        # File Menu
-        file_menu = menubar.addMenu("File")
-        file_menu.addAction(self.open_act)
-        file_menu.addAction(self.save_act)
-        file_menu.addSeparator()
-        file_menu.addAction(self.autosave_act)
-        file_menu.addSeparator()
-        exit_act = QAction("Exit", self)
-        exit_act.triggered.connect(self.close)
-        file_menu.addAction(exit_act)
-
-        # View Menu
-        view_menu = menubar.addMenu("View")
-        theme_menu = view_menu.addMenu("Theme")
-        
-        dark_theme_act = QAction("Dark Mode", self)
-        dark_theme_act.triggered.connect(lambda: self.apply_theme("dark"))
-        theme_menu.addAction(dark_theme_act)
-        
-        light_theme_act = QAction("Light Mode", self)
-        light_theme_act.triggered.connect(lambda: self.apply_theme("light"))
-        theme_menu.addAction(light_theme_act)
-        
-        view_menu.addSeparator()
-        view_menu.addAction(self.stealth_action)
-        view_menu.addAction(self.top_action)
-
-        # Format Menu
-        format_menu = menubar.addMenu("Format")
-        format_menu.addAction(self.bold_act)
-        format_menu.addAction(self.italic_act)
-        format_menu.addAction(self.underline_act)
-        format_menu.addSeparator()
-        format_menu.addAction(self.list_act)
-        format_menu.addAction(self.check_act)
-        format_menu.addAction(self.code_act)
-        format_menu.addAction(self.highlight_act)
-
-        # Tools Menu
-        tools_menu = menubar.addMenu("Tools")
-        tools_menu.addAction(self.tele_act)
-        tools_menu.addAction(self.clipboard_act)
-        tools_menu.addAction(self.ghost_click_act)
-
-        # Help Menu
-        help_menu = menubar.addMenu("Help")
-        shortcuts_act = QAction("Keyboard Shortcuts", self)
-        shortcuts_act.setShortcut("F1")
-        shortcuts_act.triggered.connect(self.show_shortcuts_dialog)
-        help_menu.addAction(shortcuts_act)
-        
-        help_menu.addSeparator()
-        update_act = QAction("Check for Updates", self)
-        update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
-        help_menu.addAction(update_act)
+        self.menu_manager.setup_menu()
 
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -473,17 +304,7 @@ class MainWindow(QMainWindow):
 
 
     def update_icons(self):
-        actions = [
-            ("note.svg", self.note_act), ("browser.svg", self.browser_act),
-            ("teleprompter.svg", self.tele_act), ("folder-open.svg", self.open_act),
-            ("clipboard.svg", self.clipboard_act), ("bold.svg", self.bold_act),
-            ("italic.svg", self.italic_act), ("underline.svg", self.underline_act),
-            ("list.svg", self.list_act), ("check.svg", self.check_act),
-            ("code.svg", self.code_act), ("highlight.svg", self.highlight_act),
-            ("image.svg", self.image_act), ("search.svg", self.search_act)
-        ]
-        for icon_name, action in actions:
-            action.setIcon(self._get_icon(icon_name))
+        self.menu_manager.update_icons()
         
         if hasattr(self, 'label_ghost'):
             self.label_ghost.setPixmap(self._get_icon("ghost.svg").pixmap(16, 16))
@@ -544,6 +365,20 @@ class MainWindow(QMainWindow):
 
     def add_clipboard_dock(self):
         self.dock_manager.add_clipboard_dock(self.clipboard_manager)
+
+    def paste_from_clipboard(self, text):
+        """Sets system clipboard and inserts into active note if possible."""
+        # 1. Update system clipboard
+        self.clipboard_manager.clipboard.setText(text)
+        
+        # 2. Insert into active note
+        from src.features.notes.note_pane import NotePane
+        if self.active_pane and isinstance(self.active_pane, NotePane):
+            self.active_pane.insertPlainText(text)
+            self.statusBar().showMessage("Pasted from clipboard history", 2000)
+            self.active_pane.setFocus()
+        else:
+            self.statusBar().showMessage("Copied to clipboard (Open a note to paste)", 2000)
 
     def set_active_pane(self, pane):
         self.active_pane = pane
@@ -692,7 +527,11 @@ class MainWindow(QMainWindow):
         threading.Thread(target=check_hotkey, daemon=True).start()
         
         # Apply initial stealth state after window is shown
-        QTimer.singleShot(1000, lambda: self.toggle_stealth(self.stealth_action.isChecked()))
+        def initial_stealth():
+            stealth_act = self.menu_manager.actions.get("stealth")
+            if stealth_act:
+                self.toggle_stealth(stealth_act.isChecked())
+        QTimer.singleShot(1000, initial_stealth)
 
     def toggle_stealth(self, checked):
         # Update global filter state
@@ -715,20 +554,25 @@ class MainWindow(QMainWindow):
             self.teleprompter.btn_click_through.click()
             return
 
-        new_state = not self.ghost_click_act.isChecked()
-        self.ghost_click_act.setChecked(new_state)
-        self.toggle_ghost_click(new_state)
+        ghost_click_act = self.menu_manager.actions.get("ghost_click")
+        if ghost_click_act:
+            new_state = not ghost_click_act.isChecked()
+            ghost_click_act.setChecked(new_state)
+            self.toggle_ghost_click(new_state)
 
     def toggle_ghost_click(self, checked):
         if StealthManager.set_click_through(int(self.winId()), checked):
             self.statusBar().showMessage("Ghost Click " + ("Enabled" if checked else "Disabled"), 2000)
         else:
-            self.ghost_click_act.setChecked(not checked)
+            ghost_click_act = self.menu_manager.actions.get("ghost_click")
+            if ghost_click_act:
+                ghost_click_act.setChecked(not checked)
 
 
 
     def toggle_always_on_top(self):
-        on_top = self.top_action.isChecked()
+        on_top_act = self.menu_manager.actions.get("always_on_top")
+        on_top = on_top_act.isChecked() if on_top_act else False
         flags = self.windowFlags()
         if on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
@@ -743,7 +587,12 @@ class MainWindow(QMainWindow):
 
     def toggle_autosave(self):
         """Toggles the auto-save timer based on user action."""
-        enabled = self.autosave_act.isChecked()
+        # Sync with menu action
+        enabled = False
+        autosave_act = self.menu_manager.actions.get("autosave")
+        if autosave_act:
+            enabled = autosave_act.isChecked()
+            
         if enabled:
             if not self.autosave_timer.isActive():
                 self.autosave_timer.start()

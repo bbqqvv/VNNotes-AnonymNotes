@@ -29,7 +29,7 @@ def exception_hook(exctype, value, traceback_obj):
     # Show Error Dialog (if QApplication is running)
     if QApplication.instance():
         error_msg = f"An unexpected error occurred:\n{value}\n\nSee log file for details."
-        QMessageBox.critical(None, "Stealth Assist Crashed", error_msg)
+        QMessageBox.critical(None, "VNNotes Crashed", error_msg)
 
 
 def main():
@@ -47,11 +47,11 @@ def main():
     # 3. Windows Icon Fix (AppUserModelID)
     if sys.platform == 'win32':
         import ctypes
-        myappid = 'stealthassist.v2.enterprise' # Arbitrary ID
+        myappid = 'vnnotes.v1.enterprise' # New ID for VNNotes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     
     app = QApplication(sys.argv)
-    app.setApplicationName("Stealth Assist")
+    app.setApplicationName("VNNotes")
     
     # Set App Icon (Global)
     # The 'os' module is already imported at the top of the file, so no need to re-import here.

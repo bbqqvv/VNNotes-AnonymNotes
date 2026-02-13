@@ -46,6 +46,16 @@ class MenuToolbarManager:
                           lambda: self.main_window.apply_format("code"))
         self.create_action("highlight", "Highlight", "Highlight Text (Ctrl+H)", "Ctrl+H",
                           lambda: self.main_window.apply_format("highlight"))
+        
+        # Alignment
+        self.create_action("align-left", "Align Left", "Align Left (Ctrl+L)", "Ctrl+L",
+                          lambda: self.main_window.apply_format("align-left"), icon="align-left.svg")
+        self.create_action("align-center", "Align Center", "Align Center (Ctrl+E)", "Ctrl+E",
+                          lambda: self.main_window.apply_format("align-center"), icon="align-center.svg")
+        self.create_action("align-right", "Align Right", "Align Right (Ctrl+R)", "Ctrl+R",
+                          lambda: self.main_window.apply_format("align-right"), icon="align-right.svg")
+        self.create_action("align-justify", "Justify", "Justify (Ctrl+J)", "Ctrl+J",
+                          lambda: self.main_window.apply_format("align-justify"), icon="align-justify.svg")
         self.create_action("image", "Image", "Insert Image (Ctrl+Shift+I)", "Ctrl+Shift+I",
                           lambda: self.main_window.insert_image_to_active_note())
         self.create_action("search", "Find", "Find in Note (Ctrl+F)", "Ctrl+F",
@@ -67,7 +77,7 @@ class MenuToolbarManager:
         self.actions["ghost_click"] = self.ghost_click_act
         
         # Stealth & Top
-        self.stealth_act = QAction("Super Stealth (Anti-Capture)", self.main_window)
+        self.stealth_act = QAction(self._icon("lock.svg"), "Super Stealth (Anti-Capture)", self.main_window)
         self.stealth_act.setCheckable(True)
         self.stealth_act.setChecked(True)
         self.stealth_act.setToolTip("Hides window from Screen Share/Recording (You can still see it)")
@@ -75,7 +85,7 @@ class MenuToolbarManager:
         self.stealth_act.triggered.connect(self.main_window.toggle_stealth)
         self.actions["stealth"] = self.stealth_act
         
-        self.top_act = QAction("Always on Top", self.main_window)
+        self.top_act = QAction(self._icon("top.svg"), "Always on Top", self.main_window)
         self.top_act.setCheckable(True)
         self.top_act.setChecked(True)
         self.top_act.triggered.connect(self.main_window.toggle_always_on_top)
@@ -90,6 +100,13 @@ class MenuToolbarManager:
         self.update_act = QAction("Check for Updates", self.main_window)
         self.update_act.triggered.connect(self.main_window.check_for_updates)
         self.actions["update"] = self.update_act
+
+        # Auto-Save
+        self.autosave_act = QAction("Auto-Save", self.main_window)
+        self.autosave_act.setCheckable(True)
+        self.autosave_act.setChecked(True) # Default on
+        self.autosave_act.triggered.connect(self.main_window.toggle_autosave)
+        self.actions["autosave"] = self.autosave_act
 
     def create_action(self, key, text, tooltip, shortcut, callback, icon=None):
         icon_name = icon if icon else f"{key}.svg"
@@ -107,22 +124,29 @@ class MenuToolbarManager:
         toolbar.setIconSize(QSize(20, 20))
         self.main_window.addToolBar(toolbar)
         
-        # Add Actions
+        # Core Group (Left)
         toolbar.addAction(self.actions["note"])
         toolbar.addAction(self.actions["browser"])
         toolbar.addAction(self.actions["prompter"])
         toolbar.addAction(self.actions["open"])
         toolbar.addAction(self.actions["clipboard"])
-        toolbar.addSeparator()
-        
-        # Formatting (subset)
         toolbar.addAction(self.actions["image"])
         
-        # Spacer
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        toolbar.addWidget(spacer)
+        # Spacer Left
+        spacer_left = QWidget()
+        spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer_left)
+
+        # Alignment Group (Center)
+        toolbar.addAction(self.actions["align-left"])
+        toolbar.addAction(self.actions["align-center"])
+        toolbar.addAction(self.actions["align-right"])
         
+        # Spacer Right
+        spacer_right = QWidget()
+        spacer_right.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer_right)
+
         # Search
         toolbar.addAction(self.actions["search"])
         
@@ -151,9 +175,26 @@ class MenuToolbarManager:
         file_menu = menubar.addMenu("File")
         file_menu.addAction(self.actions["open"])
         file_menu.addSeparator()
+        if "autosave" in self.actions:
+            file_menu.addAction(self.actions["autosave"])
+        file_menu.addSeparator()
         exit_act = QAction("Exit", self.main_window)
         exit_act.triggered.connect(self.main_window.close)
         file_menu.addAction(exit_act)
+
+        # View
+        view_menu = menubar.addMenu("View")
+        # Add dock management toggles automatically
+        dock_menu = self.main_window.createPopupMenu()
+        if dock_menu:
+            for action in dock_menu.actions():
+                view_menu.addAction(action)
+            view_menu.addSeparator()
+            
+        view_menu.addAction(self.actions["stealth"])
+        view_menu.addAction(self.actions["always_on_top"])
+        view_menu.addAction(self.actions["ghost_toggle"])
+        view_menu.addAction(self.actions["ghost_click"])
         
         # Format
         format_menu = menubar.addMenu("Format")
@@ -165,6 +206,11 @@ class MenuToolbarManager:
         format_menu.addAction(self.actions["check"])
         format_menu.addAction(self.actions["code"])
         format_menu.addAction(self.actions["highlight"])
+        format_menu.addSeparator()
+        format_menu.addAction(self.actions["align-left"])
+        format_menu.addAction(self.actions["align-center"])
+        format_menu.addAction(self.actions["align-right"])
+        format_menu.addAction(self.actions["align-justify"])
         
         # Tools
         tools_menu = menubar.addMenu("Tools")
@@ -174,24 +220,24 @@ class MenuToolbarManager:
         
         # Help
         help_menu = menubar.addMenu("Help")
-        shortcuts_act = QAction("Keyboard Shortcuts", self.main_window)
-        shortcuts_act.setShortcut("F1")
-        shortcuts_act.triggered.connect(self.main_window.show_shortcuts_dialog)
-        help_menu.addAction(shortcuts_act)
+        help_menu.addAction(self.actions["shortcuts"])
+        help_menu.addSeparator()
+        help_menu.addAction(self.actions["update"])
         
     def _icon(self, filename):
-        # ... logic to get icon ...
-        # Since this logic is duplicated, maybe move to a util or pass from main window
-        # For now, replicate or call main_window._icon if public
-        return self.main_window._icon(filename)
+        return self.main_window._get_icon(filename)
 
     def update_icons(self):
         # Update all actions
         for key, action in self.actions.items():
             icon_name = f"{key}.svg"
-            # specific mapping if needed
+            # specific mapping
             if key == "open": icon_name = "folder-open.svg"
             if key == "prompter": icon_name = "teleprompter.svg"
+            if key == "stealth": icon_name = "lock.svg"
+            if key == "always_on_top": icon_name = "top.svg"
+            if key == "ghost_toggle": icon_name = "ghost.svg"
+            if key == "ghost_click": icon_name = "ghost.svg" # Reuse same icon or different?
             
             action.setIcon(self._icon(icon_name))
             

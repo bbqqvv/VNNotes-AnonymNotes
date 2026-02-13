@@ -21,11 +21,11 @@ export default function Changelog() {
                         isLatest={true}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">Official Launch:</strong> The first public release of VNNotes.</li>
-                            <li><strong className="text-white">Anti-Capture:</strong> Advanced Ghost Mode technology to bypass screen sharing and recording.</li>
-                            <li><strong className="text-white">Power Notes:</strong> Full Markdown support with image alignment, precise resizing, and drag-and-drop.</li>
-                            <li><strong className="text-white">Multi-Tooling:</strong> Integrated mini-browser and clipboard manager.</li>
-                            <li><strong className="text-white">Local Privacy:</strong> All data stored locally in JSON format; no cloud tracking.</li>
+                            <li><strong className="text-white">Phantom Invisibility:</strong> Advanced Anti-Capture technology to bypass Zoom, Teams, and OBS.</li>
+                            <li><strong className="text-white">Multi-Document Workspace:</strong> Manage multiple notes and scripts simultaneously with an intuitive tab system.</li>
+                            <li><strong className="text-white">Ultra-Hub Dock:</strong> Integrated Mini-Browser and Smart-Paste Clipboard for lethal productivity.</li>
+                            <li><strong className="text-white">Meeting Master Teleprompter:</strong> Professional floating prompts for high-stakes presentations.</li>
+                            <li><strong className="text-white">Standalone Private Vault:</strong> 100% local data storage with zero telemetry or tracking.</li>
                         </ul>
                     </ChangelogEntry>
                 </div>

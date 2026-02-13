@@ -84,7 +84,7 @@ SOFTWARE."""
         except:
             tk.Label(self.sidebar, text="VNNotes", fg="white", bg="#0f172a", font=("Segoe UI", 20, "bold")).pack(pady=50)
             
-        tk.Label(self.sidebar, text="Professional Workspace", fg="#94a3b8", bg="#0f172a", font=("Segoe UI", 9)).pack(side="bottom", pady=20)
+        tk.Label(self.sidebar, text="The Secret Weapon for Flow", fg="#94a3b8", bg="#0f172a", font=("Segoe UI", 9)).pack(side="bottom", pady=20)
 
         # Build Frames
         self.create_welcome_page()
@@ -110,7 +110,7 @@ SOFTWARE."""
         f = tk.Frame(self.container, bg="#f8f9fa")
         ttk.Label(f, text="Welcome to VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         
-        desc = "VNNotes is a specialized workspace designed for privacy and productivity. This setup wizard will guide you through the official installation process of VNNotes v1.0.0.\n\nKey features in this version:\n• Advanced Anti-Capture technology\n• High-performance Markdown editing\n• Secure Local-Only data storage\n• Multi-tool integration (Browser & Clipboard)"
+        desc = "VNNotes is the ultimate stealth partner for high-stakes Meetings and Interviews. This setup wizard will guide you through the official installation process of VNNotes v1.0.0 Stable.\n\nKey Power Features:\n• Phantom Invisibility (Anti-Capture Tech)\n• Meeting Master Teleprompting\n• Multi-Document Workspace System\n• Integrated Ultra-Hub (Browser & Clipboard)\n• 100% Standalone Private Vault"
         tk.Label(f, text=desc, bg="#f8f9fa", wraplength=400, justify="left", font=("Segoe UI", 10)).pack(anchor="w")
         
         tk.Label(f, text="\nClick 'Next' to proceed with the installation.", bg="#f8f9fa", font=("Segoe UI", 10, "italic")).pack(anchor="w")

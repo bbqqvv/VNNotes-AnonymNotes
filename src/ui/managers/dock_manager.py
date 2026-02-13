@@ -136,6 +136,10 @@ class DockManager:
         if hasattr(self.main_window, 'paste_from_clipboard'):
              clipboard_pane.item_clicked.connect(self.main_window.paste_from_clipboard)
         
+        # Deletion support
+        clipboard_pane.item_remove_requested.connect(clipboard_manager_instance.remove_item)
+        clipboard_pane.clear_all_requested.connect(clipboard_manager_instance.clear_history)
+        
         clipboard_pane.update_history(clipboard_manager_instance.get_history())
 
         dock.setWidget(clipboard_pane)

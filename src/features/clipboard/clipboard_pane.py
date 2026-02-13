@@ -4,19 +4,18 @@ from PyQt6.QtGui import QFont
 
 class ClipboardPane(QWidget):
     item_clicked = pyqtSignal(str) # Signal when user selects an item
+    item_remove_requested = pyqtSignal(str)
+    clear_all_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
-        # Header (Optional, maybe just use Dock title)
-        # self.header = QLabel("History (Click to Paste)")
-        # self.header.setStyleSheet("color: #888; font-size: 10px; padding: 4px;")
-        # self.layout.addWidget(self.header)
-        
         self.list_widget = QListWidget()
         self.list_widget.setFrameShape(QListWidget.Shape.NoFrame)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self.on_context_menu)
         self.list_widget.setStyleSheet("""
             QListWidget { background: transparent; }
             QListWidget::item { 
@@ -46,3 +45,30 @@ class ClipboardPane(QWidget):
     def on_item_clicked(self, item):
         full_text = item.data(Qt.ItemDataRole.UserRole)
         self.item_clicked.emit(full_text)
+
+    def on_context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction, QIcon
+        import os
+        
+        # Icon helper
+        main_window = self.window()
+        def get_icon(name):
+             if hasattr(main_window, "_get_icon"):
+                 return main_window._get_icon(name)
+             return QIcon()
+
+        menu = QMenu(self)
+        
+        if item:
+            remove_act = QAction(get_icon("close.svg"), "Remove Item", self)
+            remove_act.triggered.connect(lambda: self.item_remove_requested.emit(item.data(Qt.ItemDataRole.UserRole)))
+            menu.addAction(remove_act)
+            menu.addSeparator()
+
+        clear_act = QAction(get_icon("trash.svg"), "Clear All History", self)
+        clear_act.triggered.connect(lambda: self.clear_all_requested.emit())
+        menu.addAction(clear_act)
+        
+        menu.exec(self.list_widget.mapToGlobal(pos))

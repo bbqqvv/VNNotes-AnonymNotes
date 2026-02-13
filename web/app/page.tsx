@@ -19,7 +19,7 @@ export default function Home() {
             <Link href="#features" className="hover:text-white transition-colors">Features</Link>
             <Link href="/changelog" className="hover:text-white transition-colors">Changelog</Link>
             <Link
-              href="https://github.com/bbqqvv/AnonymNotes/releases/latest"
+              href="https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest"
               className="bg-white text-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors"
             >
               Download
@@ -43,7 +43,7 @@ export default function Home() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            v1.0.0 is now available
+            v1.0.0 Stable is now live.
           </motion.div>
 
           <motion.h1
@@ -52,7 +52,7 @@ export default function Home() {
             transition={{ duration: 0.5, delay: 0.1 }}
             className="text-5xl md:text-7xl font-bold tracking-tight mb-8 bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent"
           >
-            The Invisible Workspace <br /> for Professionals.
+            The Secret Weapon <br /> for Professional Flow.
           </motion.h1>
 
           <motion.p
@@ -61,9 +61,8 @@ export default function Home() {
             transition={{ duration: 0.5, delay: 0.2 }}
             className="text-lg md:text-xl text-neutral-400 mb-12 max-w-2xl mx-auto leading-relaxed"
           >
-            Take notes, browse changes, and stay organized without anyone noticing.
-            Designed for privacy-conscious environments.
-            <span className="text-white/80"> Totally invisible to screen sharing.</span>
+            The only workspace designed to be <span className="text-emerald-400 font-semibold italic text-emerald-400">completely invisible</span> to screen sharing.
+            Bridge your workflow between Word, Web, and Notes—secretly.
           </motion.p>
 
           <motion.div
@@ -73,7 +72,7 @@ export default function Home() {
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <Link
-              href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
+              href="https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
               className="group flex items-center gap-2 bg-white text-black px-8 py-4 rounded-full font-semibold hover:bg-neutral-200 transition-all hover:scale-105 active:scale-95"
             >
               <Download className="w-5 h-5 group-hover:animate-bounce" />
@@ -121,33 +120,33 @@ export default function Home() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <FeatureCard
               icon={<Ghost className="w-6 h-6 text-emerald-400" />}
-              title="Ghost Mode"
-              description="The window is completely invisible to screen sharing apps (Zoom, Teams, OBS) while remaining visible to you."
-            />
-            <FeatureCard
-              icon={<FileText className="w-6 h-6 text-blue-400" />}
-              title="Rich Notes"
-              description="Full markdown support, image drag & drop, checklists, and code highlighting for serious note-taking."
-            />
-            <FeatureCard
-              icon={<Globe className="w-6 h-6 text-purple-400" />}
-              title="Mini Browser"
-              description="Browse documentation or look up info without ever leaving the app window or switching tabs."
+              title="Anti-Capture Technology"
+              description="100% invisible to Zoom, Teams, and OBS. Share your screen while keeping your notes, research, and scripts entirely hidden from others."
             />
             <FeatureCard
               icon={<Move className="w-6 h-6 text-orange-400" />}
-              title="Drag & Drop"
-              description="New in v1.0! Effortlessly arrange your content. Drag images and text exactly where you want them."
+              title="Smart Meeting Teleprompter"
+              description="Float transparent scripts over your video calls. Maintain perfect eye contact while delivering your points with absolute confidence."
             />
             <FeatureCard
-              icon={<Shield className="w-6 h-6 text-red-400" />}
-              title="Local Privacy"
-              description="Data is stored locally on your machine. No cloud sync, no tracking, complete ownership."
+              icon={<FileText className="w-6 h-6 text-blue-400" />}
+              title="Multi-Document Workspace"
+              description="Manage multiple notes and scripts simultaneously with an intuitive tab system. Switch between interview questions and scripts instantly."
             />
             <FeatureCard
               icon={<Zap className="w-6 h-6 text-yellow-400" />}
-              title="Smart Teleprompter"
-              description="Overlay your notes or script transparently on top of any meeting app. Read without looking away."
+              title="Integrated Research Hub"
+              description="Built-in Mini Browser and Smart Clipboard with Auto-Paste. Access documentation and copy-paste answers in real-time."
+            />
+            <FeatureCard
+              icon={<Globe className="w-6 h-6 text-purple-400" />}
+              title="Fluid Organization"
+              description="Effortless drag-and-drop for images and text. Master your content structure during live presentations without breaking flow."
+            />
+            <FeatureCard
+              icon={<Shield className="w-6 h-6 text-red-400" />}
+              title="Zero-Trace Privacy"
+              description="Military-grade local storage. Your high-stakes meeting notes and sensitive documents never touch the cloud. 100% private."
             />
           </div>
         </div>
@@ -162,7 +161,7 @@ export default function Home() {
             <br />Free and open source.
           </p>
           <Link
-            href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
+            href="https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
             className="inline-flex items-center gap-2 bg-emerald-600 text-white px-8 py-4 rounded-full font-bold hover:bg-emerald-500 transition-all hover:scale-105 shadow-lg shadow-emerald-500/20"
           >
             <Download className="w-5 h-5" />
@@ -179,7 +178,7 @@ export default function Home() {
         <p>© 2026 VNNotes. Built for privacy.</p>
         <p className="mt-1 text-neutral-600">Copyright © VTech Digital Solution</p>
         <div className="flex justify-center gap-6 mt-6">
-          <Link href="https://github.com/bbqqvv/AnonymNotes" className="hover:text-white">GitHub</Link>
+          <Link href="https://github.com/bbqqvv/VNNotes-AnonymNotes" className="hover:text-white">GitHub</Link>
           <Link href="/changelog" className="hover:text-white">Changelog</Link>
           {/* <Link href="/privacy" className="hover:text-white">Privacy</Link> */}
         </div>
