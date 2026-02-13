@@ -2,7 +2,7 @@ import requests
 import json
 from packaging import version
 
-CURRENT_VERSION = "1.5.1"
+CURRENT_VERSION = "1.0.0"
 GITHUB_REPO = "bbqqvv/AnonymNotes"
 
 def check_for_updates():

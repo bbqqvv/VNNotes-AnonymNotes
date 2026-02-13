@@ -1,6 +1,6 @@
 # 🍃 VNNotes: The Invisible Workspace
 
-![Version](https://img.shields.io/badge/version-1.5.1-emerald?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.0.0-emerald?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
@@ -19,7 +19,7 @@ Sử dụng **Windows Display Affinity API**, VNNotes có khả năng:
 -   Điều chỉnh độ trong suốt (Opacity) để hòa làm một với môi trường.
 
 ### 2. 📝 Power Notes (Ghi chú Mạnh mẽ)
-Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp (Cập nhật **v1.5.1**):
+Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp (Cập nhật **v1.0.0**):
 -   **Kéo & Thả (Drag & Drop)**: Kéo ảnh, văn bản từ bên ngoài vào hoặc di chuyển tự do trong bài viết.
 -   **Căn Chỉnh Ảnh**: Chuột phải vào ảnh -> Chọn **Align Left / Center / Right**.
 -   **Resize Thông minh**: Double-click vào ảnh để nhập kích thước pixel chính xác.
@@ -42,7 +42,7 @@ Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp 
 ### Cách 1: Người dùng phổ thông (Khuyên dùng)
 Tải bộ cài đặt `.exe` mới nhất tại trang **Releases**:
 
-👉 **[Download VNNotes v1.5.1](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
+👉 **[Download VNNotes v1.0.0](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
 
 1.  Tải file `StealthAssist_Setup.exe`.
 2.  Chạy file cài đặt.
