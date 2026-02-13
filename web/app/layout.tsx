@@ -16,10 +16,8 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://stealthassist.vercel.app"),
   title: "Stealth Assist - The Invisible Workspace",
   description: "Privacy-focused note-taking and browsing tool for professionals. Invisible to screen sharing, local storage only.",
-  icons: {
-    icon: "/logo.png",
-  },
   openGraph: {
+
     title: "Stealth Assist - The Invisible Workspace",
     description: "Privacy-focused note-taking and browsing tool for professionals.",
     url: "https://stealthassist.vercel.app",
@@ -46,9 +44,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="icon" href="/logo.png" />
-      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
