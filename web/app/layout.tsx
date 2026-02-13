@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://stealthassist.vercel.app"),
-  title: "Stealth Assist - The Invisible Workspace",
+  title: "VNNotes - The Invisible Workspace",
   description: "Privacy-focused note-taking and browsing tool for professionals. Invisible to screen sharing, local storage only.",
   icons: {
     icon: "/favicon.ico",
@@ -24,16 +24,16 @@ export const metadata: Metadata = {
   openGraph: {
 
 
-    title: "Stealth Assist - The Invisible Workspace",
+    title: "VNNotes - The Invisible Workspace",
     description: "Privacy-focused note-taking and browsing tool for professionals.",
     url: "https://stealthassist.vercel.app",
-    siteName: "Stealth Assist",
+    siteName: "VNNotes",
     images: [
       {
         url: "/meta.png",
         width: 1200,
         height: 630,
-        alt: "Stealth Assist Preview",
+        alt: "VNNotes Preview",
       },
     ],
     locale: "en_US",

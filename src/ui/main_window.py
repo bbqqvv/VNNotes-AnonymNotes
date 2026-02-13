@@ -28,7 +28,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = ConfigManager()
-        self.setWindowTitle("Stealth Assist")
+        self.setWindowTitle("VNNotes")
         
         # Paths
         if getattr(sys, 'frozen', False):

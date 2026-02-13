@@ -12,8 +12,8 @@ export default function Home() {
       <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-neutral-950/80 backdrop-blur-md">
         <div className="container mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 font-bold text-xl tracking-tight">
-            <img src="/logo.png" alt="Stealth Assist Logo" className="w-8 h-8 object-contain" />
-            <span><span className="text-emerald-500">Stealth</span>Assist</span>
+            <img src="/logo.png" alt="VNNotes Logo" className="w-8 h-8 object-contain" />
+            <span><span className="text-emerald-500">VN</span>Notes</span>
           </div>
           <div className="flex items-center gap-6 text-sm font-medium text-neutral-400">
             <Link href="#features" className="hover:text-white transition-colors">Features</Link>
@@ -73,7 +73,7 @@ export default function Home() {
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <Link
-              href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/StealthAssist_Setup.exe"
+              href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
               className="group flex items-center gap-2 bg-white text-black px-8 py-4 rounded-full font-semibold hover:bg-neutral-200 transition-all hover:scale-105 active:scale-95"
             >
               <Download className="w-5 h-5 group-hover:animate-bounce" />
@@ -162,7 +162,7 @@ export default function Home() {
             <br />Free and open source.
           </p>
           <Link
-            href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/StealthAssist_Setup.exe"
+            href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/VNNotes_Setup.exe"
             className="inline-flex items-center gap-2 bg-emerald-600 text-white px-8 py-4 rounded-full font-bold hover:bg-emerald-500 transition-all hover:scale-105 shadow-lg shadow-emerald-500/20"
           >
             <Download className="w-5 h-5" />
@@ -176,7 +176,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-white/5 py-12 text-center text-neutral-500 text-sm">
-        <p>© 2026 Stealth Assist. Built for privacy.</p>
+        <p>© 2026 VNNotes. Built for privacy.</p>
         <div className="flex justify-center gap-6 mt-4">
           <Link href="https://github.com/bbqqvv/AnonymNotes" className="hover:text-white">GitHub</Link>
           <Link href="/changelog" className="hover:text-white">Changelog</Link>

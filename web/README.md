@@ -1,4 +1,4 @@
-# Stealth Assist - Web Landing Page
+# VNNotes - Web Landing Page
 
 Built with [Next.js](https://nextjs.org) and [Tailwind CSS](https://tailwindcss.com).
 
@@ -20,7 +20,7 @@ Built with [Next.js](https://nextjs.org) and [Tailwind CSS](https://tailwindcss.
 
 ## Deployment
 
-This project acts as the official landing page for Stealth Assist.
+This project acts as the official landing page for VNNotes.
 It is deployable to **Vercel** with zero configuration.
 
 ## Features

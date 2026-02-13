@@ -1,10 +1,10 @@
-# 🍃 Stealth Assist: The Invisible Workspace
+# 🍃 VNNotes: The Invisible Workspace
 
 ![Version](https://img.shields.io/badge/version-1.5.1-emerald?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
-**Stealth Assist** là không gian làm việc "tàng hình" chuyên nghiệp dành cho Windows. Ứng dụng giúp bạn ghi chú, lưu trữ ý tưởng và tra cứu thông tin mà **tuyệt đối không bị phát hiện** bởi các phần mềm quay màn hình, livestream hay chia sẻ màn hình (Zoom, Teams, Discord, OBS...).
+**VNNotes** là không gian làm việc "tàng hình" chuyên nghiệp dành cho Windows. Ứng dụng giúp bạn ghi chú, lưu trữ ý tưởng và tra cứu thông tin mà **tuyệt đối không bị phát hiện** bởi các phần mềm quay màn hình, livestream hay chia sẻ màn hình (Zoom, Teams, Discord, OBS...).
 
 > **"Nhìn thấy bởi bạn. Vô hình với thế giới."**
 
@@ -13,7 +13,7 @@
 ## 🌟 Tính Năng Nổi Bật
 
 ### 1. 👻 Ghost Mode (Công nghệ Anti-Capture)
-Sử dụng **Windows Display Affinity API**, Stealth Assist có khả năng:
+Sử dụng **Windows Display Affinity API**, VNNotes có khả năng:
 -   **Tàng hình 100%** trên các phần mềm quay/chụp màn hình.
 -   Khi bạn share màn hình, người xem chỉ thấy... hình nền desktop của bạn, trong khi bạn vẫn đang đọc ghi chú bình thường.
 -   Điều chỉnh độ trong suốt (Opacity) để hòa làm một với môi trường.
@@ -42,7 +42,7 @@ Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp 
 ### Cách 1: Người dùng phổ thông (Khuyên dùng)
 Tải bộ cài đặt `.exe` mới nhất tại trang **Releases**:
 
-👉 **[Download Stealth Assist v1.5.1](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
+👉 **[Download VNNotes v1.5.1](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
 
 1.  Tải file `StealthAssist_Setup.exe`.
 2.  Chạy file cài đặt.
