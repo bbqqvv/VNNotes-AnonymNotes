@@ -2,6 +2,11 @@ import os
 import zipfile
 import xml.etree.ElementTree as ET
 
+try:
+    import docx
+except ImportError:
+    docx = None
+
 class UniversalReader:
     @staticmethod
     def read_file(file_path):
@@ -30,34 +35,27 @@ class UniversalReader:
 
     @staticmethod
     def _read_docx(file_path):
-        """Extracts text from .docx without python-docx dependency."""
+        """Extracts text from .docx using python-docx with fallback."""
+        if docx:
+            try:
+                doc = docx.Document(file_path)
+                return "\n".join([para.text for para in doc.paragraphs])
+            except Exception as e:
+                print(f"python-docx error: {e}, falling back to manual parser...")
+                
+        # Manual Fallback
         try:
-            with zipfile.ZipFile(file_path) as docx:
-                xml_content = docx.read('word/document.xml')
+            with zipfile.ZipFile(file_path) as docx_zip:
+                xml_content = docx_zip.read('word/document.xml')
                 tree = ET.fromstring(xml_content)
-                
-                # Namespace map (docx usually uses w string)
-                # But we can just iterate all elements and look for <w:t> text tags
-                
                 passages = []
-                
-                # Recursive function to find text
-                # Actually, simpler: find all 't' tags which contain text
-                # The namespace usually is http://schemas.openxmlformats.org/wordprocessingml/2006/main
-                
-                namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-                
                 for p in tree.iter():
                     if p.tag.endswith('}p'): # Paragraph
                         para_text = ""
                         for t in p.iter():
                             if t.tag.endswith('}t'): # Text node
-                                if t.text:
-                                    para_text += t.text
-                        if para_text:
-                            passages.append(para_text)
-                            
+                                if t.text: para_text += t.text
+                        if para_text: passages.append(para_text)
                 return "\n".join(passages)
-                
         except Exception as e:
-            return f"Error extracting DOCX: {str(e)}\n(Try installing python-docx for better support)"
+            return f"Error extracting DOCX: {str(e)}\n(Install python-docx for better results)"

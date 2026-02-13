@@ -3,3 +3,4 @@ PyQt6-WebEngine
 keyboard
 requests
 packaging
+python-docx

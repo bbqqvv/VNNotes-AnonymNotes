@@ -25,7 +25,7 @@ class MenuToolbarManager:
         self.create_action("prompter", "Prompter", "Open Teleprompter (Ctrl+Shift+P)", "Ctrl+Shift+P",
                           self.main_window.open_teleprompter, icon="teleprompter.svg")
 
-        self.create_action("open", "Open File", "Open File (Ctrl+O)", "Ctrl+O",
+        self.create_action("open", "Open File", "Open File / Word Document (Ctrl+O)", "Ctrl+O",
                           self.main_window.open_file_dialog, icon="folder-open.svg")
                           
         self.create_action("clipboard", "Clipboard", "Clipboard History (Ctrl+Shift+V)", "Ctrl+Shift+V",

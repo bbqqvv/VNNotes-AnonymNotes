@@ -760,7 +760,7 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(value / 100.0)
 
     def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Supported Files (*.txt *.docx *.md *.py *.js *.html);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Word & Text Files (*.docx *.txt *.md *.py *.js *.html);;All Files (*)")
         if path:
             content = UniversalReader.read_file(path)
             if content:
