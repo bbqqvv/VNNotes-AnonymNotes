@@ -108,7 +108,7 @@ SOFTWARE."""
 
     def create_welcome_page(self):
         f = tk.Frame(self.container, bg="#f8f9fa")
-        tk.Label(f, text="Welcome to VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
+        ttk.Label(f, text="Welcome to VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         
         desc = "VNNotes is a specialized workspace designed for privacy and productivity. This setup wizard will guide you through the official installation process of VNNotes v1.0.0.\n\nKey features in this version:\n• Advanced Anti-Capture technology\n• High-performance Markdown editing\n• Secure Local-Only data storage\n• Multi-tool integration (Browser & Clipboard)"
         tk.Label(f, text=desc, bg="#f8f9fa", wraplength=400, justify="left", font=("Segoe UI", 10)).pack(anchor="w")
@@ -118,7 +118,7 @@ SOFTWARE."""
 
     def create_license_page(self):
         f = tk.Frame(self.container, bg="#f8f9fa")
-        tk.Label(f, text="End-User License Agreement", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
+        ttk.Label(f, text="End-User License Agreement", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         
         text_area = tk.Text(f, height=12, width=50, font=("Consolas", 9), relief="flat", borderwidth=1)
         text_area.insert("1.0", self.license_text)
@@ -131,7 +131,7 @@ SOFTWARE."""
 
     def create_location_page(self):
         f = tk.Frame(self.container, bg="#f8f9fa")
-        tk.Label(f, text="Select Installation Folder", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
+        ttk.Label(f, text="Select Installation Folder", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         tk.Label(f, text="The installer will install VNNotes to the following folder:", bg="#f8f9fa").pack(anchor="w")
         
         path_frame = tk.Frame(f, bg="#f8f9fa")
@@ -146,7 +146,7 @@ SOFTWARE."""
 
     def create_install_page(self):
         f = tk.Frame(self.container, bg="#f8f9fa")
-        tk.Label(f, text="Installing Files", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
+        ttk.Label(f, text="Installing Files", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         self.status_label = tk.Label(f, text="Ready to extract files...", bg="#f8f9fa")
         self.status_label.pack(anchor="w")
         
@@ -156,7 +156,7 @@ SOFTWARE."""
 
     def create_finish_page(self):
         f = tk.Frame(self.container, bg="#f8f9fa")
-        tk.Label(f, text="Completing VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
+        ttk.Label(f, text="Completing VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         tk.Label(f, text="VNNotes has been successfully installed on your computer.\n\nClick Finish to exit the wizard.", bg="#f8f9fa").pack(anchor="w")
         
         self.chk_shortcut = tk.IntVar(value=1)
