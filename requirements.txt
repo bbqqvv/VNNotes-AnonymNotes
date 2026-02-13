@@ -4,3 +4,4 @@ keyboard
 requests
 packaging
 python-docx
+mammoth

@@ -764,7 +764,8 @@ class MainWindow(QMainWindow):
         if path:
             content = UniversalReader.read_file(path)
             if content:
-                self.add_note_dock(content=content.replace("\n", "<br>"), title=os.path.basename(path))
+                # Content is already HTML-ready from UniversalReader (.docx via mammoth or .txt via internal logic)
+                self.add_note_dock(content=content, title=os.path.basename(path))
 
     def show_shortcuts_dialog(self):
         QMessageBox.information(self, "Shortcuts", "Ctrl+N: Note\nCtrl+Shift+B: Browser\nCtrl+Shift+P: Prompter\nCtrl+Shift+S: Stealth\nCtrl+Shift+F9: Ghost Click")
