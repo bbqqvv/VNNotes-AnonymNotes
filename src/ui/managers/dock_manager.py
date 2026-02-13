@@ -31,7 +31,8 @@ class DockManager:
         
         note_pane = NotePane()
         if content:
-            note_pane.setHtml(content)
+            # Use safety method to ensure base64 images from Word/Pasting are loaded as resources
+            note_pane.set_html_safe(content)
         
         # Track focus (Delegate back to main window if needed)
         if hasattr(self.main_window, 'set_active_pane'):

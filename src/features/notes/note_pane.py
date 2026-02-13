@@ -11,14 +11,50 @@ class NotePane(QTextEdit):
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
-        self.setAcceptDrops(True)
 
+    def set_html_safe(self, html):
+        """
+        Robustly sets HTML by extracting base64 images and adding them as document resources.
+        This fixes issues where QTextEdit fails to render data:image URIs directly.
+        """
+        import re
+        import base64
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtCore import QUrl
+        
+        # Regex to find data URIs
+        pattern = r'src="data:image/(?P<ext>[^;]+);base64,(?P<data>[^"]+)"'
+        
+        index = 0
+        def replace_match(match):
+            nonlocal index
+            ext = match.group('ext')
+            data_b64 = match.group('data')
+            
+            try:
+                # 1. Decode base64
+                img_data = base64.b64decode(data_b64)
+                image = QImage.fromData(img_data)
+                
+                if not image.isNull():
+                    # 2. Add as internal resource (ResourceType 3 = Image)
+                    res_name = f"word_img_{index}.{ext}"
+                    self.document().addResource(3, QUrl(res_name), image)
+                    index += 1
+                    # 3. Return new internal src
+                    return f'src="{res_name}"'
+            except Exception as e:
+                print(f"Error processing Word image {index}: {e}")
+                
+            return match.group(0) # Keep original if failed
+
+        # Replace and set
+        processed_html = re.sub(pattern, replace_match, html)
+        self.setHtml(processed_html)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
         self.focus_received.emit(self)
-
-    # ... Formatting methods ...
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -56,7 +92,6 @@ class NotePane(QTextEdit):
             import os
             
             # Helper to find assets
-            # src/features/notes/note_pane.py -> ../../../assets
             base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
             icon_dir = os.path.join(base_path, "assets", "icons", "dark_theme")
 
@@ -75,8 +110,6 @@ class NotePane(QTextEdit):
             if dock_manager:
                 ai_url = f"https://www.perplexity.ai/?q={selected_text}"
                 ai_act.triggered.connect(lambda: dock_manager.add_browser_dock(ai_url))
-            else:
-                ai_act.setEnabled(False)
 
             # Translate Action
             translate_act = QAction(f"Translate '{display_text}'", self)
@@ -87,8 +120,6 @@ class NotePane(QTextEdit):
             if dock_manager:
                 trans_url = f"https://translate.google.com/?sl=auto&tl=vi&text={selected_text}&op=translate"
                 translate_act.triggered.connect(lambda: dock_manager.add_browser_dock(trans_url))
-            else:
-                translate_act.setEnabled(False) # Should ideally not happen
             
             # Search Action
             search_act = QAction(f"Search '{display_text}'", self)
@@ -99,8 +130,6 @@ class NotePane(QTextEdit):
             if dock_manager:
                 search_url = f"https://www.google.com/search?q={selected_text}"
                 search_act.triggered.connect(lambda: dock_manager.add_browser_dock(search_url))
-            else:
-                 search_act.setEnabled(False)
 
             # Insert at the TOP
             first_action = menu.actions()[0] if menu.actions() else None
@@ -115,103 +144,49 @@ class NotePane(QTextEdit):
                 menu.addAction(search_act)
                 menu.addAction(translate_act)
         
-        # --- END NEW FEATURES ---
-        
-        # Check if cursor is on image
-        
-        # Check if cursor is on image
+        # --- Image Options ---
         cursor = self.cursorForPosition(event.pos())
         fmt = cursor.charFormat()
         
         if fmt.isImageFormat():
             menu.addSeparator()
             
-            # Alignment Submenu
             align_menu = menu.addMenu("📏 Alignment")
-            
             align_left = align_menu.addAction("⬅️ Align Left")
             align_left.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignLeft))
-            
             align_center = align_menu.addAction("⏺️ Align Center")
             align_center.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignCenter))
-            
             align_right = align_menu.addAction("➡️ Align Right")
             align_right.triggered.connect(lambda: self.set_image_alignment(cursor, Qt.AlignmentFlag.AlignRight))
             
             menu.addSeparator()
-            
             resize_act = menu.addAction("🖼️ Resize Image...")
             resize_act.triggered.connect(lambda: self.resize_image_dialog(cursor))
-            
             reset_act = menu.addAction("🔄 Reset Size")
             reset_act.triggered.connect(lambda: self.reset_image_size(cursor))
-            
             save_act = menu.addAction("💾 Save Image As...")
             save_act.triggered.connect(lambda: self.save_image_as(cursor))
             
         menu.exec(event.globalPos())
 
     def set_image_alignment(self, cursor, alignment):
-        # Alignment applies to the BLOCK (Paragraph) containing the image.
-        # This will align the image AND any text on the same line.
-        
-        # 1. Select the block
         block_cursor = QTextCursor(cursor)
-        
-        # 2. Apply Block Format
         from PyQt6.QtGui import QTextBlockFormat
         block_fmt = QTextBlockFormat()
         block_fmt.setAlignment(alignment)
-        
         block_cursor.mergeBlockFormat(block_fmt)
 
     def resize_image_dialog(self, cursor):
         from PyQt6.QtWidgets import QInputDialog
-        
-        fmt = cursor.charFormat().toImageFormat()
-        current_width = fmt.width()
-        
-        # If width is 0, it means original size. Try to get it.
-        if current_width == 0:
-             # Try to get native size
-             name = fmt.name()
-             image = self.document().resource(3, QUrl(name))
-             if image and not image.isNull():
-                 current_width = image.width()
-             else:
-                 current_width = 300 # Default fallback
-        
-        new_width, ok = QInputDialog.getInt(
-            self, "Resize Image", "Enter new width (px):", 
-            int(current_width), 10, 2000, 10
-        )
-        
-        if ok:
-            # Apply new width
-            # We need to make sure we apply it to the image at cursor
-            # Select the image char
-            self.setTextCursor(cursor)
-            selection_cursor = self.textCursor()
-            selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
-            
-    def resize_image_dialog(self, cursor):
-        from PyQt6.QtWidgets import QInputDialog
-        
-        # 1. Precise Image Targeting
-        # cursor.charFormat() refers to the char BEFORE the cursor.
-        
         target_cursor = None
         img_fmt = None
         
-        # Strategy A: Check current cursor (Image is to the LEFT)
         if cursor.charFormat().isImageFormat():
             target_cursor = self.textCursor()
             target_cursor.setPosition(cursor.position())
             target_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
             img_fmt = cursor.charFormat().toImageFormat()
             
-        # Strategy B: Check right of cursor (Image is to the RIGHT)
-        # We peek at the char to the right
         if not target_cursor:
             c_right = self.textCursor()
             c_right.setPosition(cursor.position())
@@ -223,92 +198,55 @@ class NotePane(QTextEdit):
         if not target_cursor or not img_fmt:
             return
 
-        # 2. Get Data
         current_width = img_fmt.width()
-        current_height = img_fmt.height()
-        name = img_fmt.name() # CRITICAL: This holds the Base64 data for embedded images
+        name = img_fmt.name()
         
-        # Native size fallback
         image_resource = self.document().resource(3, QUrl(name))
-        native_width = 0
-        native_height = 0
-        if image_resource and not image_resource.isNull():
-             native_width = image_resource.width()
-             native_height = image_resource.height()
+        native_width = image_resource.width() if image_resource and not image_resource.isNull() else 0
+        native_height = image_resource.height() if image_resource and not image_resource.isNull() else 0
         
         start_width = current_width if current_width > 0 else (native_width if native_width > 0 else 300)
         
-        # 3. User Input
-        new_width, ok = QInputDialog.getInt(
-            self, "Resize Image", "Enter new width (px):", 
-            int(start_width), 10, 2000, 10
-        )
+        new_width, ok = QInputDialog.getInt(self, "Resize Image", "Enter new width (px):", int(start_width), 10, 2000, 10)
         
         if ok:
-             # 4. Aspect Ratio Calculation
              new_height = 0
-             if native_width > 0 and native_height > 0:
+             if native_width > 0:
                   new_height = int(new_width * (native_height / native_width))
-             elif current_width > 0 and current_height > 0:
-                  new_height = int(new_width * (current_height / current_width))
              
-             # 5. Apply Updates
-             # IMPORTANT: We must create a new format but manually ensure the NAME is set.
-             # Sometimes toImageFormat() might produce a format that needs explicit naming when re-applied.
-             
-             new_fmt = target_cursor.charFormat().toImageFormat() # Start from fresh selection format
-             new_fmt.setName(name) # Explicitly restore name
+             new_fmt = target_cursor.charFormat().toImageFormat()
+             new_fmt.setName(name)
              new_fmt.setWidth(new_width)
+             if new_height > 0: new_fmt.setHeight(new_height)
+             else: new_fmt.setHeight(0)
              
-             if new_height > 0:
-                 new_fmt.setHeight(new_height)
-             else:
-                 new_fmt.setHeight(0) # Let Qt decide (but explicit is better for "disappearing" bugs)
-             
-             # 6. Merge instead of Set
-             # mergeCharFormat is safer as it keeps other properties
              target_cursor.mergeCharFormat(new_fmt)
 
     def reset_image_size(self, cursor):
-        # Select image
         self.setTextCursor(cursor)
         selection_cursor = self.textCursor()
         selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
-        
         if not selection_cursor.charFormat().isImageFormat():
              selection_cursor = self.textCursor()
              selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-        
         if selection_cursor.charFormat().isImageFormat():
              fmt = selection_cursor.charFormat().toImageFormat()
-             fmt.setWidth(0) # 0 means native size in Qt
+             fmt.setWidth(0)
              fmt.setHeight(0)
              selection_cursor.setCharFormat(fmt)
 
     def save_image_as(self, cursor):
         from PyQt6.QtWidgets import QFileDialog
-        
         fmt = cursor.charFormat().toImageFormat()
         name = fmt.name()
-        
-        # Retrieve image data
         image = self.document().resource(3, QUrl(name))
-        
-        if isinstance(image, float): # Sometimes returns garbage if not found?
-             return
-             
         if image and not image.isNull():
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Image", "image.png", "Images (*.png *.jpg)"
-            )
-            
-            if file_path:
-                image.save(file_path)
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "image.png", "Images (*.png *.jpg)")
+            if file_path: image.save(file_path)
 
     def apply_format(self, fmt_type):
         cursor = self.textCursor()
         fmt = cursor.charFormat()
-        
         if fmt_type == "bold":
             fmt.setFontWeight(QFont.Weight.Bold if fmt.fontWeight() != QFont.Weight.Bold else QFont.Weight.Normal)
             cursor.mergeCharFormat(fmt)
@@ -330,81 +268,44 @@ class NotePane(QTextEdit):
             cursor.mergeCharFormat(fmt)
         elif fmt_type == "highlight":
             from PyQt6.QtGui import QColor
-            # Toggle highlight? Or just set yellow.
             if fmt.background().color().name() == "#ffff00":
-                fmt.setBackground(Qt.GlobalColor.transparent) # Remove
+                fmt.setBackground(Qt.GlobalColor.transparent)
             else:
                 fmt.setBackground(QColor("yellow"))
-                fmt.setForeground(QColor("black")) # Text black on yellow
+                fmt.setForeground(QColor("black"))
             cursor.mergeCharFormat(fmt)
-        
         self.setFocus()
         
     def canInsertFromMimeData(self, source):
-        if source.hasImage():
-            return True
-        return super().canInsertFromMimeData(source)
+        return source.hasImage() or super().canInsertFromMimeData(source)
 
     def insertFromMimeData(self, source):
         if source.hasImage():
             image = source.imageData()
             if image:
-                # Convert QImage/QPixmap to Base64 HTML
-                # Process: QVariant (image) -> QImage -> QBuffer -> Base64
                 from PyQt6.QtCore import QBuffer, QIODevice
+                from PyQt6.QtGui import QImage
                 import base64
-                
-                # Check if it's already a QImage or QPixmap
-                if not hasattr(image, "save"):
-                     # Try to convert if it's a QVariant wrapping QImage
-                     from PyQt6.QtGui import QImage
-                     if isinstance(image, QImage):
-                         pass
-                     else:
-                         image = QImage(image)
-
+                if not isinstance(image, QImage): image = QImage(image)
                 ba = QBuffer()
                 ba.open(QIODevice.OpenModeFlag.WriteOnly)
                 image.save(ba, "PNG")
                 base64_data = base64.b64encode(ba.data().data()).decode('utf-8')
-                
-                html = f'<img src="data:image/png;base64,{base64_data}" />'
-                self.insertHtml(html)
+                self.set_html_safe(f'<img src="data:image/png;base64,{base64_data}" />')
                 return
-                
-                
         super().insertFromMimeData(source)
 
     def insert_image_from_file(self):
-        """Open file dialog and insert selected image"""
         from PyQt6.QtWidgets import QFileDialog
         from PyQt6.QtGui import QImage
         from PyQt6.QtCore import QBuffer, QIODevice
         import base64
-        
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Image",
-            "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
-        )
-        
-        if not file_path:
-            return
-        
-        # Load image
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+        if not file_path: return
         image = QImage(file_path)
-        if image.isNull():
-            return
-        
-        # Convert to base64
+        if image.isNull(): return
         ba = QBuffer()
         ba.open(QIODevice.OpenModeFlag.WriteOnly)
         image.save(ba, "PNG")
         base64_data = base64.b64encode(ba.data().data()).decode('utf-8')
-        
-        # Insert as HTML
-        html = f'<img src="data:image/png;base64,{base64_data}" />'
-        self.insertHtml(html)
-
-
+        self.set_html_safe(f'<img src="data:image/png;base64,{base64_data}" />')
