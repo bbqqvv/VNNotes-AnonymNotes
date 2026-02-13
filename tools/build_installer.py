@@ -5,10 +5,11 @@ import subprocess
 
 def make_installer():
     base_dir = "d:/Workspace/Tool/TH/StealthAssist"
-    dist_dir = os.path.join(base_dir, "dist/StealthAssist")
+    dist_dir = os.path.join(base_dir, "dist/VNNotes")
     output_zip = os.path.join(base_dir, "tools/data.zip")
     installer_script = os.path.join(base_dir, "tools/setup_gui.py")
     app_image = os.path.join(base_dir, "appnote.png")
+    license_file = os.path.join(base_dir, "LICENSE")
     
     print("1. Optimizing App Bloat (Removing debug resources)...")
     # Exclusion list: files we don't need
@@ -42,17 +43,18 @@ def make_installer():
         "py", "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
-        "--name", "StealthAssist_Setup",
+        "--name", "VNNotes_Setup",
         "--icon", app_image, # Use app icon for installer
         "--add-data", f"{output_zip};.",
         "--add-data", f"{app_image};.", # Include image for installer UI
+        "--add-data", f"{license_file};.", # Include License in installer
         "--clean",
         "--noconfirm",
         installer_script
     ]
     
     subprocess.check_call(cmd, cwd=os.path.join(base_dir, "tools"))
-    print("DONE! Installer is in tools/dist/StealthAssist_Setup.exe")
+    print("DONE! Installer is in tools/dist/VNNotes_Setup.exe")
 
 if __name__ == "__main__":
     make_installer()

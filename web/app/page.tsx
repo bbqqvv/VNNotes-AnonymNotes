@@ -137,7 +137,7 @@ export default function Home() {
             <FeatureCard
               icon={<Move className="w-6 h-6 text-orange-400" />}
               title="Drag & Drop"
-              description="New in v1.5! Effortlessly arrange your content. Drag images and text exactly where you want them."
+              description="New in v1.0! Effortlessly arrange your content. Drag images and text exactly where you want them."
             />
             <FeatureCard
               icon={<Shield className="w-6 h-6 text-red-400" />}
@@ -175,9 +175,10 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-white/5 py-12 text-center text-neutral-500 text-sm">
+      <footer className="border-t border-white/5 py-12 text-center text-neutral-500 text-sm font-light">
         <p>© 2026 VNNotes. Built for privacy.</p>
-        <div className="flex justify-center gap-6 mt-4">
+        <p className="mt-1 text-neutral-600">Copyright © VTech Digital Solution</p>
+        <div className="flex justify-center gap-6 mt-6">
           <Link href="https://github.com/bbqqvv/AnonymNotes" className="hover:text-white">GitHub</Link>
           <Link href="/changelog" className="hover:text-white">Changelog</Link>
           {/* <Link href="/privacy" className="hover:text-white">Privacy</Link> */}

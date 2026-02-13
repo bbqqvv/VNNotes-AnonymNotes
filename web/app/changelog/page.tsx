@@ -10,58 +10,31 @@ export default function Changelog() {
                         <ArrowLeft className="w-4 h-4" /> Back to Home
                     </Link>
                     <h1 className="text-4xl font-bold mb-4">Changelog</h1>
-                    <p className="text-neutral-400">Latest updates and improvements to Stealth Assist.</p>
+                    <p className="text-neutral-400">Latest updates and improvements to VNNotes.</p>
                 </div>
 
                 <div className="space-y-12">
-                    {/* Version 1.5.1 */}
+                    {/* Version 1.0.0 */}
                     <ChangelogEntry
-                        version="v1.5.1"
-                        date="February 12, 2026"
+                        version="v1.0.0"
+                        date="February 13, 2026"
                         isLatest={true}
                     >
-                        <ul className="list-disc list-inside space-y-2 text-neutral-300">
-                            <li><strong className="text-white">New:</strong> Fixed Application Icon not showing in title bar.</li>
-                            <li><strong className="text-white">New:</strong> App now starts Maximized by default for better visibility.</li>
-                            <li><strong className="text-white">Improvement:</strong> Enhanced drag-and-drop stability.</li>
-                        </ul>
-                    </ChangelogEntry>
-
-                    {/* Version 1.5.0 */}
-                    <ChangelogEntry
-                        version="v1.5.0"
-                        date="February 12, 2026"
-                    >
-                        <ul className="list-disc list-inside space-y-2 text-neutral-300">
-                            <li><strong className="text-white">Feature:</strong> <strong>Image Alignment</strong>. Right-click images to align Left, Center, or Right.</li>
-                            <li><strong className="text-white">Feature:</strong> <strong>Drag & Drop</strong>. Move images and text within the editor naturally.</li>
-                            <li><strong className="text-white">UI:</strong> Removed legacy drag-to-resize handles in favor of cleaner interactions.</li>
-                        </ul>
-                    </ChangelogEntry>
-
-                    {/* Version 1.4.0 */}
-                    <ChangelogEntry
-                        version="v1.4.0"
-                        date="February 10, 2026"
-                    >
-                        <ul className="list-disc list-inside space-y-2 text-neutral-300">
-                            <li><strong className="text-white">Feature:</strong> Double-click images to resize them precisely via dialog.</li>
-                            <li><strong className="text-white">Feature:</strong> Right-click Context Menu for images (Resize, Reset, Save As).</li>
-                            <li><strong className="text-white">Fix:</strong> Resolved issue where images would disappear after resizing.</li>
-                        </ul>
-                    </ChangelogEntry>
-
-                    {/* Version 1.3.0 */}
-                    <ChangelogEntry
-                        version="v1.3.0"
-                        date="January 25, 2026"
-                    >
-                        <ul className="list-disc list-inside space-y-2 text-neutral-300">
-                            <li><strong className="text-white">Feature:</strong> Ghost Mode (Opacity Slider).</li>
-                            <li><strong className="text-white">Feature:</strong> Auto-Update system checks GitHub Releases.</li>
+                        <ul className="list-disc list-inside space-y-3 text-neutral-300">
+                            <li><strong className="text-white">Official Launch:</strong> The first public release of VNNotes.</li>
+                            <li><strong className="text-white">Anti-Capture:</strong> Advanced Ghost Mode technology to bypass screen sharing and recording.</li>
+                            <li><strong className="text-white">Power Notes:</strong> Full Markdown support with image alignment, precise resizing, and drag-and-drop.</li>
+                            <li><strong className="text-white">Multi-Tooling:</strong> Integrated mini-browser and clipboard manager.</li>
+                            <li><strong className="text-white">Local Privacy:</strong> All data stored locally in JSON format; no cloud tracking.</li>
                         </ul>
                     </ChangelogEntry>
                 </div>
+
+                {/* Footer */}
+                <footer className="mt-20 pt-12 border-t border-white/5 text-center text-neutral-500 text-sm font-light">
+                    <p>© 2026 VNNotes. Built for privacy.</p>
+                    <p className="mt-1 text-neutral-600">Copyright © VTech Digital Solution</p>
+                </footer>
             </div>
         </div>
     );

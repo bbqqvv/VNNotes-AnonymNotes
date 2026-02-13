@@ -4,111 +4,111 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
-**VNNotes** là không gian làm việc "tàng hình" chuyên nghiệp dành cho Windows. Ứng dụng giúp bạn ghi chú, lưu trữ ý tưởng và tra cứu thông tin mà **tuyệt đối không bị phát hiện** bởi các phần mềm quay màn hình, livestream hay chia sẻ màn hình (Zoom, Teams, Discord, OBS...).
+**VNNotes** is a professional "invisible" workspace for Windows. The application helps you take notes, store ideas, and look up information with **absolute stealth**, remaining undetectable by screen recording software, livestreams, or screen sharing (Zoom, Teams, Discord, OBS...).
 
-> **"Nhìn thấy bởi bạn. Vô hình với thế giới."**
-
----
-
-## 🌟 Tính Năng Nổi Bật
-
-### 1. 👻 Ghost Mode (Công nghệ Anti-Capture)
-Sử dụng **Windows Display Affinity API**, VNNotes có khả năng:
--   **Tàng hình 100%** trên các phần mềm quay/chụp màn hình.
--   Khi bạn share màn hình, người xem chỉ thấy... hình nền desktop của bạn, trong khi bạn vẫn đang đọc ghi chú bình thường.
--   Điều chỉnh độ trong suốt (Opacity) để hòa làm một với môi trường.
-
-### 2. 📝 Power Notes (Ghi chú Mạnh mẽ)
-Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp (Cập nhật **v1.0.0**):
--   **Kéo & Thả (Drag & Drop)**: Kéo ảnh, văn bản từ bên ngoài vào hoặc di chuyển tự do trong bài viết.
--   **Căn Chỉnh Ảnh**: Chuột phải vào ảnh -> Chọn **Align Left / Center / Right**.
--   **Resize Thông minh**: Double-click vào ảnh để nhập kích thước pixel chính xác.
--   **Code Blocks**: Viết code đẹp mắt với font Monospace.
--   **Checklists**: Quản lý việc cần làm nhanh chóng.
-
-### 3. 🌐 Mini Browser (Trình duyệt Tích hợp)
--   Docking Browser ngay bên cạnh ghi chú.
--   Tra cứu tài liệu, Google Search, xem docs mà không cần Alt-Tab ra ngoài trình duyệt chính.
--   Luôn ở trạng thái "Always on Top" nếu cần.
-
-### 4. 🔒 Local Privacy (Riêng tư Tuyệt đối)
--   Dữ liệu lưu cục bộ (**JSON**), không gửi lên Cloud.
--   Bạn hoàn toàn làm chủ dữ liệu của mình.
+> **"Visible to you. Invisible to the world."**
 
 ---
 
-## 🚀 Tải về & Cài đặt
+## 🌟 Key Features
 
-### Cách 1: Người dùng phổ thông (Khuyên dùng)
-Tải bộ cài đặt `.exe` mới nhất tại trang **Releases**:
+### 1. 👻 Ghost Mode (Anti-Capture Technology)
+Using the **Windows Display Affinity API**, VNNotes can:
+-   **Be 100% invisible** to screen recording/capturing software.
+-   When sharing your screen, viewers only see your desktop wallpaper, while you continue to read or take notes normally.
+-   Adjust transparency (Opacity) to blend perfectly with your environment.
+
+### 2. 📝 Power Notes
+A professional Markdown editor with advanced features (Updated **v1.0.0**):
+-   **Drag & Drop**: Drag images and text from outside or move them freely within the editor.
+-   **Image Alignment**: Right-click on images -> Select **Align Left / Center / Right**.
+-   **Smart Resize**: Double-click on images to enter precise pixel dimensions.
+-   **Code Blocks**: Write beautiful code with Monospace fonts.
+-   **Checklists**: Quickly manage your to-do lists.
+
+### 3. 🌐 Integrated Mini Browser
+-   Dock a browser right next to your notes.
+-   Look up documentation, Google Search, or view docs without Alt-Tabbing out of your main workflow.
+-   Optionally set to "Always on Top".
+
+### 4. 🔒 Local Privacy
+-   Data is stored locally (**JSON**), never sent to the Cloud.
+-   You have full ownership of your data.
+
+---
+
+## 🚀 Download & Installation
+
+### Option 1: For General Users (Recommended)
+Download the latest `.exe` installer from the **Releases** page:
 
 👉 **[Download VNNotes v1.0.0](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
 
-1.  Tải file `StealthAssist_Setup.exe`.
-2.  Chạy file cài đặt.
-3.  Mở app từ Shortcut ngoài Desktop.
+1.  Download `VNNotes_Setup.exe`.
+2.  Run the installer.
+3.  Launch the app from the Desktop shortcut.
 
-### Cách 2: Chạy Portable (Không cần cài)
-Trong thư mục cài đặt (`%LOCALAPPDATA%\StealthAssist`), bạn có thể copy file `.exe` đi bất cứ đâu.
+### Option 2: Portable Version
+In the installation folder (`%LOCALAPPDATA%\VNNotes`), you can copy the `.exe` file anywhere.
 
 ---
 
-## 💻 Dành cho Developer
+## 💻 For Developers
 
-Nếu bạn muốn phát triển thêm tính năng hoặc tự build từ source code:
+If you want to add features or build from source:
 
-### Yêu cầu
--   Python 3.10 trở lên.
+### Requirements
+-   Python 3.10 or higher.
 -   Git.
 
-### Cài đặt môi trường
+### Environment Setup
 ```bash
-# 1. Clone dự án về máy
+# 1. Clone the project
 git clone https://github.com/bbqqvv/AnonymNotes.git
 cd AnonymNotes
 
-# 2. Tạo môi trường ảo (Khuyên dùng)
+# 2. Create a virtual environment
 python -m venv venv
 .\venv\Scripts\activate
 
-# 3. Cài đặt thư viện
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-### Chạy ứng dụng
+### Running the App
 ```bash
 python main.py
 ```
 
-### Đóng gói (Build .exe)
-Sử dụng script build tự động (đã tối ưu dung lượng):
+### Building the Executable
+Use the automated build script:
 ```bash
 python tools/build_installer.py
 ```
-File cài đặt sẽ nằm trong thư mục `tools/dist/`.
+The installer will be located in `tools/dist/`.
 
 ---
 
-## 🌐 Web Landing Page (SaaS)
-Dự án bao gồm một Landing Page hiện đại (Next.js + TailwindCSS) nằm trong thư mục `/web`.
-Để chạy website này:
+## 🌐 Web Landing Page
+The project includes a modern Landing Page (Next.js + TailwindCSS) located in the `/web` directory.
+To run the website:
 1.  `cd web`
-2.  Chạy `install_and_run.bat`.
-3.  Truy cập `http://localhost:3000`.
+2.  Run `install_and_run.bat`.
+3.  Visit `http://localhost:3000`.
 
 ---
 
-## ⌨️ Phím tắt (Shortcuts)
+## ⌨️ Shortcuts
 
-| Phím tắt | Chức năng |
+| Shortcut | Function |
 | :--- | :--- |
-| `Ctrl + N` | Tạo ghi chú mới |
-| `Ctrl + S` | Lưu thủ công (App tự lưu mỗi 5s) |
-| `Ctrl + F` | Tìm kiếm trong ghi chú |
-| `Ctrl + B/I/U` | In đậm / Nghiêng / Gạch chân |
-| `Double-Click Ảnh` | Chỉnh kích thước ảnh |
+| `Ctrl + N` | Create new note |
+| `Ctrl + S` | Manual save (Auto-saves every 5s) |
+| `Ctrl + F` | Search within notes |
+| `Ctrl + B/I/U` | Bold / Italic / Underline |
+| `Double-Click Image` | Resize image |
 
 ---
 
-**Phát triển bởi VTechStudio.**
+**Developed by VTech Digital Solution.**
 *Privacy First. Always.*

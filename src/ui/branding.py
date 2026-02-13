@@ -54,7 +54,7 @@ class BrandingOverlay(QWidget):
         painter.setFont(font)
         painter.setPen(QColor("#ffffff") if self._is_dark_mode() else QColor("#000000"))
         
-        text = "STEALTH ASSIST"
+        text = "VNNOTES"
         metrics = painter.fontMetrics()
         text_w = metrics.horizontalAdvance(text)
         
