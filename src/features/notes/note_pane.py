@@ -11,21 +11,8 @@ class NotePane(QTextEdit):
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
-        # self.setDragEnabled(True) # QTextEdit doesn't have this, it handles dnd internally
-        
-        self.setStyleSheet("""
-            QTextEdit {
-                background-color: #333;
-                color: #eee;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 14px;
-                border: none;
-                padding: 10px;
-            }
-            QTextEdit:focus {
-                background-color: #383838;
-            }
-        """)
+        self.setAcceptDrops(True)
+
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -59,6 +46,78 @@ class NotePane(QTextEdit):
     def contextMenuEvent(self, event):
         # Create standard menu first
         menu = self.createStandardContextMenu()
+        
+        # --- NEW FEATURES: Search & Translate ---
+        cursor = self.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if selected_text:
+            from PyQt6.QtGui import QAction, QIcon
+            import os
+            
+            # Helper to find assets
+            # src/features/notes/note_pane.py -> ../../../assets
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            icon_dir = os.path.join(base_path, "assets", "icons", "dark_theme")
+
+            # Find MainWindow to access DockManager
+            main_window = self.window()
+            dock_manager = getattr(main_window, 'dock_manager', None)
+            
+            display_text = (selected_text[:20] + '..') if len(selected_text) > 20 else selected_text
+            
+            # Ask AI Action
+            ai_act = QAction(f"✨ Ask AI '{display_text}'", self)
+            ai_icon_path = os.path.join(icon_dir, "ai.svg")
+            if os.path.exists(ai_icon_path):
+                ai_act.setIcon(QIcon(ai_icon_path))
+            
+            if dock_manager:
+                ai_url = f"https://www.perplexity.ai/?q={selected_text}"
+                ai_act.triggered.connect(lambda: dock_manager.add_browser_dock(ai_url))
+            else:
+                ai_act.setEnabled(False)
+
+            # Translate Action
+            translate_act = QAction(f"Translate '{display_text}'", self)
+            translate_icon_path = os.path.join(icon_dir, "browser.svg")
+            if os.path.exists(translate_icon_path):
+                translate_act.setIcon(QIcon(translate_icon_path))
+                
+            if dock_manager:
+                trans_url = f"https://translate.google.com/?sl=auto&tl=vi&text={selected_text}&op=translate"
+                translate_act.triggered.connect(lambda: dock_manager.add_browser_dock(trans_url))
+            else:
+                translate_act.setEnabled(False) # Should ideally not happen
+            
+            # Search Action
+            search_act = QAction(f"Search '{display_text}'", self)
+            search_icon_path = os.path.join(icon_dir, "search.svg")
+            if os.path.exists(search_icon_path):
+                search_act.setIcon(QIcon(search_icon_path))
+                
+            if dock_manager:
+                search_url = f"https://www.google.com/search?q={selected_text}"
+                search_act.triggered.connect(lambda: dock_manager.add_browser_dock(search_url))
+            else:
+                 search_act.setEnabled(False)
+
+            # Insert at the TOP
+            first_action = menu.actions()[0] if menu.actions() else None
+            
+            if first_action:
+                menu.insertAction(first_action, translate_act)
+                menu.insertAction(translate_act, search_act) 
+                menu.insertAction(search_act, ai_act) # AI First
+                menu.insertSeparator(first_action)
+            else:
+                menu.addAction(ai_act)
+                menu.addAction(search_act)
+                menu.addAction(translate_act)
+        
+        # --- END NEW FEATURES ---
+        
+        # Check if cursor is on image
         
         # Check if cursor is on image
         cursor = self.cursorForPosition(event.pos())

@@ -1,0 +1,198 @@
+"use client";
+
+import { Download, Ghost, FileText, Globe, Move, Shield, Zap } from "lucide-react";
+import Link from "next/link";
+import { motion } from "framer-motion";
+
+export default function Home() {
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans selection:bg-emerald-500/30">
+
+      {/* Navbar */}
+      <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-neutral-950/80 backdrop-blur-md">
+        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3 font-bold text-xl tracking-tight">
+            <img src="/logo.png" alt="Stealth Assist Logo" className="w-8 h-8 object-contain" />
+            <span><span className="text-emerald-500">Stealth</span>Assist</span>
+          </div>
+          <div className="flex items-center gap-6 text-sm font-medium text-neutral-400">
+            <Link href="#features" className="hover:text-white transition-colors">Features</Link>
+            <Link href="/changelog" className="hover:text-white transition-colors">Changelog</Link>
+            <Link
+              href="https://github.com/bbqqvv/AnonymNotes/releases/latest"
+              className="bg-white text-black px-4 py-2 rounded-full hover:bg-neutral-200 transition-colors"
+            >
+              Download
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <section className="pt-32 pb-20 px-6 relative overflow-hidden">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-emerald-500/20 blur-[120px] rounded-full pointer-events-none" />
+
+        <div className="container mx-auto text-center relative z-10 max-w-4xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-emerald-400 mb-8"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            v1.5.1 is now available
+          </motion.div>
+
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="text-5xl md:text-7xl font-bold tracking-tight mb-8 bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent"
+          >
+            The Invisible Workspace <br /> for Professionals.
+          </motion.h1>
+
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            className="text-lg md:text-xl text-neutral-400 mb-12 max-w-2xl mx-auto leading-relaxed"
+          >
+            Take notes, browse changes, and stay organized without anyone noticing.
+            Designed for privacy-conscious environments.
+            <span className="text-white/80"> Totally invisible to screen sharing.</span>
+          </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          >
+            <Link
+              href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/StealthAssist_Setup.exe"
+              className="group flex items-center gap-2 bg-white text-black px-8 py-4 rounded-full font-semibold hover:bg-neutral-200 transition-all hover:scale-105 active:scale-95"
+            >
+              <Download className="w-5 h-5 group-hover:animate-bounce" />
+              Download for Windows
+            </Link>
+            <Link
+              href="#features"
+              className="px-8 py-4 rounded-full font-medium text-neutral-400 hover:text-white transition-colors"
+            >
+              Learn more
+            </Link>
+          </motion.div>
+
+          {/* App Preview Mockup */}
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.4 }}
+            className="mt-20 relative rounded-xl border border-white/10 bg-neutral-900/50 backdrop-blur-sm shadow-2xl overflow-hidden p-2"
+          >
+            <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/10 to-purple-500/10 pointer-events-none" />
+            {/* Placeholder for screenshot - using a div for now to represent the UI */}
+            <div className="aspect-[16/9] bg-neutral-900 rounded-lg flex items-center justify-center border border-white/5 overflow-hidden shadow-2xl">
+              <video
+                src="/video.mp4"
+                autoPlay
+                muted
+                loop
+                playsInline
+                className="w-full h-full object-cover pointer-events-none"
+              />
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Features Grid */}
+      <section id="features" className="py-32 px-6 bg-neutral-900/30">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-20">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">Powerful. Private. Invisible.</h2>
+            <p className="text-neutral-400">Everything you need to work secretly, built into one lightweight app.</p>
+          </div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <FeatureCard
+              icon={<Ghost className="w-6 h-6 text-emerald-400" />}
+              title="Ghost Mode"
+              description="The window is completely invisible to screen sharing apps (Zoom, Teams, OBS) while remaining visible to you."
+            />
+            <FeatureCard
+              icon={<FileText className="w-6 h-6 text-blue-400" />}
+              title="Rich Notes"
+              description="Full markdown support, image drag & drop, checklists, and code highlighting for serious note-taking."
+            />
+            <FeatureCard
+              icon={<Globe className="w-6 h-6 text-purple-400" />}
+              title="Mini Browser"
+              description="Browse documentation or look up info without ever leaving the app window or switching tabs."
+            />
+            <FeatureCard
+              icon={<Move className="w-6 h-6 text-orange-400" />}
+              title="Drag & Drop"
+              description="New in v1.5! Effortlessly arrange your content. Drag images and text exactly where you want them."
+            />
+            <FeatureCard
+              icon={<Shield className="w-6 h-6 text-red-400" />}
+              title="Local Privacy"
+              description="Data is stored locally on your machine. No cloud sync, no tracking, complete ownership."
+            />
+            <FeatureCard
+              icon={<Zap className="w-6 h-6 text-yellow-400" />}
+              title="Smart Teleprompter"
+              description="Overlay your notes or script transparently on top of any meeting app. Read without looking away."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-24 px-6 text-center">
+        <div className="container mx-auto max-w-3xl">
+          <h2 className="text-4xl font-bold mb-8">Ready to work in stealth?</h2>
+          <p className="text-neutral-400 mb-10 text-lg">
+            Join thousands of professionals who value their privacy and workflow.
+            <br />Free and open source.
+          </p>
+          <Link
+            href="https://github.com/bbqqvv/AnonymNotes/releases/latest/download/StealthAssist_Setup.exe"
+            className="inline-flex items-center gap-2 bg-emerald-600 text-white px-8 py-4 rounded-full font-bold hover:bg-emerald-500 transition-all hover:scale-105 shadow-lg shadow-emerald-500/20"
+          >
+            <Download className="w-5 h-5" />
+            Download v1.5.1
+          </Link>
+          <p className="mt-6 text-sm text-neutral-600">
+            Windows 10/11 • 64-bit • Installer (~200MB)
+          </p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-white/5 py-12 text-center text-neutral-500 text-sm">
+        <p>© 2026 Stealth Assist. Built for privacy.</p>
+        <div className="flex justify-center gap-6 mt-4">
+          <Link href="https://github.com/bbqqvv/AnonymNotes" className="hover:text-white">GitHub</Link>
+          <Link href="/changelog" className="hover:text-white">Changelog</Link>
+          {/* <Link href="/privacy" className="hover:text-white">Privacy</Link> */}
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function FeatureCard({ icon, title, description }: { icon: React.ReactNode, title: string, description: string }) {
+  return (
+    <div className="p-6 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 transition-colors">
+      <div className="mb-4 p-3 rounded-lg bg-black/30 w-fit">{icon}</div>
+      <h3 className="text-xl font-semibold mb-2">{title}</h3>
+      <p className="text-neutral-400 leading-relaxed">{description}</p>
+    </div>
+  );
+}

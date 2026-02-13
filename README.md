@@ -1,75 +1,114 @@
-# 🍃 Stealth Assist
+# 🍃 Stealth Assist: The Invisible Workspace
 
-**Stealth Assist** là một công cụ hỗ trợ ghi chú và duyệt web siêu ngụy trang, được thiết kế để hoạt động bí mật và hiệu quả trên Windows.
+![Version](https://img.shields.io/badge/version-1.5.1-emerald?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
-## ✨ Tính năng nổi bật
+**Stealth Assist** là không gian làm việc "tàng hình" chuyên nghiệp dành cho Windows. Ứng dụng giúp bạn ghi chú, lưu trữ ý tưởng và tra cứu thông tin mà **tuyệt đối không bị phát hiện** bởi các phần mềm quay màn hình, livestream hay chia sẻ màn hình (Zoom, Teams, Discord, OBS...).
 
-### 1. 🛡️ Super Stealth (Anti-Screen Capture)
-Sử dụng công nghệ `SetWindowDisplayAffinity`, ứng dụng sẽ hoàn toàn **tàng hình** đối với các công cụ quay màn hình, chụp ảnh hoặc livestream (OBS, Discord, Zoom...). Bạn vẫn nhìn thấy app, nhưng người khác thì không.
+> **"Nhìn thấy bởi bạn. Vô hình với thế giới."**
 
-### 2. 📝 Power Notes
--   Hỗ trợ đầy đủ định dạng văn bản (Bold, Italic, Underline).
--   **Image Handling (v1.5)**:
-    -   Double-click để thay đổi kích thước ảnh chính xác.
-    -   Kéo & thả (Drag & Drop) để di chuyển ảnh/văn bản.
-    -   Menu chuột phải: Resize, Reset Size, Lưu ảnh, Căn chỉnh (Trái/Giữa/Phải).
--   **Checkboxes (Todo list)**: Click trực tiếp để đánh dấu hoàn thành.
--   **Code Blocks**: Định dạng code chuyên nghiệp với font Monospace và nền tối.
--   **Highlighter**: Làm nổi bật các đoạn văn bản quan trọng.
--   **Internal Search**: Tìm kiếm nhanh nội dung trong note bằng `Ctrl+F`.
+---
 
-### 🚀 Cập nhật Mới (v1.5.1)
+## 🌟 Tính Năng Nổi Bật
 
-### 🔄 Auto-Update & System
-- **Tự động cập nhật**: Kiểm tra và thông báo phiên bản mới từ GitHub khi mở app.
-- **Full Màn Hình**: Ứng dụng tự động tối ưu không gian làm việc ngay khi khởi động.
-- **Icon Chuẩn**: Logo AppNote hiển thị chính xác trên thanh tiêu đề và Taskbar.
+### 1. 👻 Ghost Mode (Công nghệ Anti-Capture)
+Sử dụng **Windows Display Affinity API**, Stealth Assist có khả năng:
+-   **Tàng hình 100%** trên các phần mềm quay/chụp màn hình.
+-   Khi bạn share màn hình, người xem chỉ thấy... hình nền desktop của bạn, trong khi bạn vẫn đang đọc ghi chú bình thường.
+-   Điều chỉnh độ trong suốt (Opacity) để hòa làm một với môi trường.
 
-### 🖼️ Image Support in Notes (v1.5)
-- **Căn Chỉnh (Alignment)**: Chuột phải vào ảnh để căn Trái, Giữa, Phải.
-- **Kéo & Thả (Drag & Drop)**: Di chuyển ảnh và văn bản dễ dàng bằng cách kéo thả.
-- **Resize Thông Minh**: Double-click vào ảnh để nhập kích thước chính xác (thay thế kéo thả cũ).
-- **Context Menu**: Menu chuột phải đầy đủ tính năng cho ảnh.
+### 2. 📝 Power Notes (Ghi chú Mạnh mẽ)
+Trình soạn thảo Markdown chuyên nghiệp với các tính năng cao cấp (Cập nhật **v1.5.1**):
+-   **Kéo & Thả (Drag & Drop)**: Kéo ảnh, văn bản từ bên ngoài vào hoặc di chuyển tự do trong bài viết.
+-   **Căn Chỉnh Ảnh**: Chuột phải vào ảnh -> Chọn **Align Left / Center / Right**.
+-   **Resize Thông minh**: Double-click vào ảnh để nhập kích thước pixel chính xác.
+-   **Code Blocks**: Viết code đẹp mắt với font Monospace.
+-   **Checklists**: Quản lý việc cần làm nhanh chóng.
 
-### 🛠️ Improvements
-- Tối ưu hóa dung lượng bộ cài đặt (Cấu trúc `libs` gọn gàng).
-- Cải thiện độ mượt mà khi soạn thảo ghi chú.
+### 3. 🌐 Mini Browser (Trình duyệt Tích hợp)
+-   Docking Browser ngay bên cạnh ghi chú.
+-   Tra cứu tài liệu, Google Search, xem docs mà không cần Alt-Tab ra ngoài trình duyệt chính.
+-   Luôn ở trạng thái "Always on Top" nếu cần.
 
-### 3. 🌐 Mini Browser
-Trình duyệt web tích hợp nhỏ gọn dạng Docking, giúp bạn tra cứu nhanh mà không cần chuyển Tab rườm rà.
+### 4. 🔒 Local Privacy (Riêng tư Tuyệt đối)
+-   Dữ liệu lưu cục bộ (**JSON**), không gửi lên Cloud.
+-   Bạn hoàn toàn làm chủ dữ liệu của mình.
 
-### 4. 🌓 Giao diện linh hoạt
--   Chế độ **Dark Mode** mặc định cực kỳ dịu mắt.
--   Chế độ **Light Mode** cho môi trường văn phòng truyền thống.
--   Tính năng **Always on Top** và điều chỉnh độ trong suốt.
-
-### 5. 💾 Lưu trữ tin cậy
-Tự động lưu lại toàn bộ trạng thái ghi chú, vị trí cửa sổ và lịch sử duyệt web khi thoát ứng dụng. Khôi phục y hệt khi mở lại.
+---
 
 ## 🚀 Tải về & Cài đặt
 
-Bạn có thể tải bản cài đặt sẵn `.exe` tại mục **[Releases](../../releases)**.
+### Cách 1: Người dùng phổ thông (Khuyên dùng)
+Tải bộ cài đặt `.exe` mới nhất tại trang **Releases**:
+
+👉 **[Download Stealth Assist v1.5.1](https://github.com/bbqqvv/AnonymNotes/releases/latest)**
 
 1.  Tải file `StealthAssist_Setup.exe`.
-2.  Chạy bộ cài đặt và làm theo hướng dẫn (Next -> Install).
-3.  Ứng dụng sẽ tự động tạo Shortcut ngoài Desktop.
+2.  Chạy file cài đặt.
+3.  Mở app từ Shortcut ngoài Desktop.
 
-## 🛠️ Yêu cầu hệ thống
--   Windows 10 hoặc Windows 11 (Cần thiết cho tính năng Super Stealth).
--   Python 3.8+ (Nếu bạn chạy từ mã nguồn).
+### Cách 2: Chạy Portable (Không cần cài)
+Trong thư mục cài đặt (`%LOCALAPPDATA%\StealthAssist`), bạn có thể copy file `.exe` đi bất cứ đâu.
 
-## 👨‍💻 Phát triển
-Nếu bạn muốn chạy từ mã nguồn:
+---
+
+## 💻 Dành cho Developer
+
+Nếu bạn muốn phát triển thêm tính năng hoặc tự build từ source code:
+
+### Yêu cầu
+-   Python 3.10 trở lên.
+-   Git.
+
+### Cài đặt môi trường
 ```bash
-# Clone repository
-git clone https://github.com/[YOUR_USERNAME]/StealthAssist.git
+# 1. Clone dự án về máy
+git clone https://github.com/bbqqvv/AnonymNotes.git
+cd AnonymNotes
 
-# Cài đặt thư viện
+# 2. Tạo môi trường ảo (Khuyên dùng)
+python -m venv venv
+.\venv\Scripts\activate
+
+# 3. Cài đặt thư viện
 pip install -r requirements.txt
+```
 
-# Chạy ứng dụng
+### Chạy ứng dụng
+```bash
 python main.py
 ```
 
+### Đóng gói (Build .exe)
+Sử dụng script build tự động (đã tối ưu dung lượng):
+```bash
+python tools/build_installer.py
+```
+File cài đặt sẽ nằm trong thư mục `tools/dist/`.
+
 ---
-*Phát triển bởi VTechStudio.*
+
+## 🌐 Web Landing Page (SaaS)
+Dự án bao gồm một Landing Page hiện đại (Next.js + TailwindCSS) nằm trong thư mục `/web`.
+Để chạy website này:
+1.  `cd web`
+2.  Chạy `install_and_run.bat`.
+3.  Truy cập `http://localhost:3000`.
+
+---
+
+## ⌨️ Phím tắt (Shortcuts)
+
+| Phím tắt | Chức năng |
+| :--- | :--- |
+| `Ctrl + N` | Tạo ghi chú mới |
+| `Ctrl + S` | Lưu thủ công (App tự lưu mỗi 5s) |
+| `Ctrl + F` | Tìm kiếm trong ghi chú |
+| `Ctrl + B/I/U` | In đậm / Nghiêng / Gạch chân |
+| `Double-Click Ảnh` | Chỉnh kích thước ảnh |
+
+---
+
+**Phát triển bởi VTechStudio.**
+*Privacy First. Always.*

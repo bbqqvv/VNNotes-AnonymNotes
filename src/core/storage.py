@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 from PyQt6.QtCore import QStandardPaths
 
 class StorageManager:
@@ -28,7 +29,7 @@ class StorageManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"StorageManager Save Error: {e}")
+            logging.error(f"StorageManager Save Error: {e}", exc_info=True)
             return False
             
     def load_data(self):
@@ -42,5 +43,5 @@ class StorageManager:
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"StorageManager Load Error: {e}")
+            logging.error(f"StorageManager Load Error: {e}", exc_info=True)
             return {}

@@ -1,37 +1,105 @@
 import json
+import os
+import sys
+import threading
+import logging
+
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QDockWidget, QToolBar, 
-                             QMessageBox, QLabel)
-from PyQt6.QtGui import QAction, QFont, QIcon
-from PyQt6.QtCore import Qt, QUrl
+                             QMessageBox, QLabel, QSizePolicy, QSlider,
+                             QSystemTrayIcon, QMenu, QApplication, QFileDialog)
+from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor
+from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray
+from PyQt6 import QtCore
 
 from src.core.stealth import StealthManager
 from src.core.config import ConfigManager
+from src.core.storage import StorageManager
+from src.core.reader import UniversalReader
+from src.core.version import check_for_updates, CURRENT_VERSION
 from src.features.notes.note_pane import NotePane
 from src.features.browser.browser_pane import BrowserPane
-
+from src.features.teleprompter.teleprompter_dialog import TeleprompterDialog
+from src.features.clipboard.clipboard_manager import ClipboardManager
+from src.ui.branding import BrandingOverlay
+from src.ui.managers.dock_manager import DockManager
+from src.ui.managers.menu_toolbar_manager import MenuToolbarManager
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = ConfigManager()
         self.setWindowTitle("Stealth Assist")
-        import os
-        import sys
         
-        # Determine base path (handle PyInstaller vs Source)
+        # Paths
         if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS
+            self.base_path = sys._MEIPASS
         else:
-            # Go up two levels from src/ui to project root
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            self.base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             
-        icon_path = os.path.join(base_path, "appnote.png")
+        icon_path = os.path.join(self.base_path, "logo.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        else:
-            print(f"Warning: Icon not found at {icon_path}")
         
-        # Load Geometry
+        # State
+        self.dock_widgets = []
+        self.active_pane = None
+        self.current_theme = "dark"
+        
+        # Managers
+        self.dock_manager = DockManager(self)
+        self.menu_manager = MenuToolbarManager(self)
+        self.clipboard_manager = ClipboardManager()
+        
+        # Setup UI
+        self.setup_window()
+        self.setup_ui()
+        self.setup_stealth()
+        self.setup_tray()
+        
+        # Final Setup
+        self.setup_status_bar_widgets()
+        # self.restore_app_state() - Removed duplicate call
+        
+        # Dynamically hook into tab bars for double-click renaming
+
+        self.tab_hook_timer = QTimer(self)
+        self.tab_hook_timer.timeout.connect(self.hook_tab_bars)
+        self.tab_hook_timer.start(1000) # Check every second
+        
+        # Periodic status bar updates
+        self.status_update_timer = QTimer(self)
+        self.status_update_timer.timeout.connect(self.update_status_bar_info)
+        self.status_update_timer.start(200) # Fast updates for char count/pos
+
+        
+        # Restore State
+        QTimer.singleShot(100, self.restore_app_state)
+        
+        # --- Auto-Save Timer ---
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(60000) # 60 seconds
+        self.autosave_timer.timeout.connect(self.auto_save)
+        
+        # Load preference
+        autosave_enabled = self.config.get_value("app/autosave_enabled", True)
+        if isinstance(autosave_enabled, str):
+            autosave_enabled = autosave_enabled.lower() == 'true'
+            
+        self.autosave_act.setChecked(autosave_enabled)
+        if autosave_enabled:
+            self.autosave_timer.start()
+
+        # Check for updates
+        # QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
+
+    def auto_save(self):
+        """Background auto-save"""
+        self.save_app_state()
+        # Optional: Show subtle indicator? 
+        # self.statusBar().showMessage("Auto-saved", 1000)
+
+    def setup_window(self):
+        self.resize(1280, 800)
         geo = self.config.get_value("window/geometry")
         if geo:
             try:
@@ -41,41 +109,223 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowState(Qt.WindowState.WindowMaximized)
             
-        self.dock_widgets = []
+        self.setDockNestingEnabled(True)
+        self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | 
+                            QMainWindow.DockOption.AllowNestedDocks | 
+                            QMainWindow.DockOption.AnimatedDocks | 
+                            QMainWindow.DockOption.GroupedDragging)
+
         
-        self.setup_ui()
-        self.setup_stealth()
-        self.setup_tray() # New Tray Setup
-        self.restore_app_state()
+        self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+
+
+    def setup_ui(self):
+        # 1. Branding Overlay (Permanent Central Widget)
+        self.branding = BrandingOverlay(self)
+        self.setCentralWidget(self.branding)
         
-        # Check for updates after 3 seconds
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(3000, self.check_for_updates)
+        # 2. Toolbar & Actions (Delegated to specialized methods for clarity)
+        self.setup_actions()
+        self.setup_toolbar()
+        self.setup_menu()
         
+        # 3. Apply Theme
+        self.apply_theme("dark")
+
+    def setup_actions(self):
+        # Tools
+        self.note_act = QAction(self._get_icon("note.svg"), "Note", self)
+        self.note_act.setShortcut("Ctrl+N")
+        self.note_act.triggered.connect(lambda: self.add_note_dock())
+
+        self.browser_act = QAction(self._get_icon("browser.svg"), "Browser", self)
+        self.browser_act.setShortcut("Ctrl+Shift+B")
+        self.browser_act.triggered.connect(lambda: self.add_browser_dock())
+
+        self.tele_act = QAction(self._get_icon("teleprompter.svg"), "Prompter", self)
+        self.tele_act.setShortcut("Ctrl+Shift+P")
+        self.tele_act.triggered.connect(self.open_teleprompter)
+
+        self.open_act = QAction(self._get_icon("folder-open.svg"), "Open File", self)
+        self.open_act.setShortcut("Ctrl+O")
+        self.open_act.triggered.connect(self.open_file_dialog)
+
+        self.clipboard_act = QAction(self._get_icon("clipboard.svg"), "Clipboard", self)
+        self.clipboard_act.setShortcut("Ctrl+Shift+V")
+        self.clipboard_act.triggered.connect(self.add_clipboard_dock)
+
+        self.save_act = QAction(self._get_icon("save.svg"), "Save", self)
+        self.save_act.setShortcut("Ctrl+S")
+        self.save_act.triggered.connect(self.save_current_work)
+
+        # Formatting
+        self.bold_act = QAction(self._get_icon("bold.svg"), "Bold", self)
+        self.bold_act.setShortcut("Ctrl+B")
+        self.bold_act.triggered.connect(lambda: self.apply_format("bold"))
+
+        self.italic_act = QAction(self._get_icon("italic.svg"), "Italic", self)
+        self.italic_act.setShortcut("Ctrl+I")
+        self.italic_act.triggered.connect(lambda: self.apply_format("italic"))
+
+        self.underline_act = QAction(self._get_icon("underline.svg"), "Underline", self)
+        self.underline_act.setShortcut("Ctrl+U")
+        self.underline_act.triggered.connect(lambda: self.apply_format("underline"))
+
+        self.list_act = QAction(self._get_icon("list.svg"), "List", self)
+        self.list_act.setShortcut("Ctrl+Shift+L")
+        self.list_act.triggered.connect(lambda: self.apply_format("list"))
+
+        self.check_act = QAction(self._get_icon("check.svg"), "Task", self)
+        self.check_act.setShortcut("Ctrl+Shift+C")
+        self.check_act.triggered.connect(lambda: self.apply_format("checkbox"))
+
+        self.code_act = QAction(self._get_icon("code.svg"), "Code", self)
+        self.code_act.setShortcut("Ctrl+Shift+K")
+        self.code_act.triggered.connect(lambda: self.apply_format("code"))
+
+        self.highlight_act = QAction(self._get_icon("highlight.svg"), "Highlight", self)
+        self.highlight_act.setShortcut("Ctrl+H")
+        self.highlight_act.triggered.connect(lambda: self.apply_format("highlight"))
+
+        self.image_act = QAction(self._get_icon("image.svg"), "Image", self)
+        self.image_act.setShortcut("Ctrl+Shift+I")
+        self.image_act.triggered.connect(self.insert_image_to_active_note)
+
+        self.search_act = QAction(self._get_icon("search.svg"), "Find", self)
+        self.search_act.setShortcut("Ctrl+F")
+        self.search_act.triggered.connect(self.show_find_dialog)
+
+        self.rename_act = QAction("Rename Note", self)
+        self.rename_act.setShortcut("Ctrl+R")
+        self.rename_act.triggered.connect(self.rename_active_note)
+
+        # Stealth Actions
+
+        self.stealth_action = QAction("Super Stealth (Anti-Capture)", self)
+        self.stealth_action.setCheckable(True)
+        self.stealth_action.setChecked(True)
+        self.stealth_action.setShortcut("Ctrl+Shift+S")
+        self.stealth_action.triggered.connect(self.toggle_stealth)
+
+        self.top_action = QAction("Always on Top", self)
+        self.top_action.setCheckable(True)
+        self.top_action.setChecked(True)
+        self.top_action.triggered.connect(self.toggle_always_on_top)
+
+        self.ghost_click_act = QAction("Ghost Click (Click-Through)", self)
+        self.ghost_click_act.setCheckable(True)
+        self.ghost_click_act.setShortcut("Ctrl+Shift+F9")
+        self.ghost_click_act.triggered.connect(self.toggle_ghost_click)
+
+        self.autosave_act = QAction("Auto-Save", self)
+        self.autosave_act.setCheckable(True)
+        self.autosave_act.setChecked(True) # Default on
+        self.autosave_act.triggered.connect(self.toggle_autosave)
+
+    def setup_toolbar(self):
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setIconSize(QSize(20, 20))
+        self.addToolBar(toolbar)
+
+        toolbar.addAction(self.note_act)
+        toolbar.addAction(self.browser_act)
+        toolbar.addAction(self.tele_act)
+        toolbar.addAction(self.open_act)
+        toolbar.addAction(self.clipboard_act)
+        toolbar.addAction(self.image_act)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        toolbar.addAction(self.search_act)
+        toolbar.addSeparator()
+
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(20, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.setFixedWidth(80)
+        self.opacity_slider.valueChanged.connect(self.change_window_opacity)
+        toolbar.addWidget(self.opacity_slider)
+
+        self.label_ghost = QLabel()
+        self.label_ghost.setPixmap(self._get_icon("ghost.svg").pixmap(16, 16))
+        toolbar.addWidget(self.label_ghost)
+
+    def setup_menu(self):
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu("File")
+        file_menu.addAction(self.open_act)
+        file_menu.addAction(self.save_act)
+        file_menu.addSeparator()
+        file_menu.addAction(self.autosave_act)
+        file_menu.addSeparator()
+        exit_act = QAction("Exit", self)
+        exit_act.triggered.connect(self.close)
+        file_menu.addAction(exit_act)
+
+        # View Menu
+        view_menu = menubar.addMenu("View")
+        theme_menu = view_menu.addMenu("Theme")
+        
+        dark_theme_act = QAction("Dark Mode", self)
+        dark_theme_act.triggered.connect(lambda: self.apply_theme("dark"))
+        theme_menu.addAction(dark_theme_act)
+        
+        light_theme_act = QAction("Light Mode", self)
+        light_theme_act.triggered.connect(lambda: self.apply_theme("light"))
+        theme_menu.addAction(light_theme_act)
+        
+        view_menu.addSeparator()
+        view_menu.addAction(self.stealth_action)
+        view_menu.addAction(self.top_action)
+
+        # Format Menu
+        format_menu = menubar.addMenu("Format")
+        format_menu.addAction(self.bold_act)
+        format_menu.addAction(self.italic_act)
+        format_menu.addAction(self.underline_act)
+        format_menu.addSeparator()
+        format_menu.addAction(self.list_act)
+        format_menu.addAction(self.check_act)
+        format_menu.addAction(self.code_act)
+        format_menu.addAction(self.highlight_act)
+
+        # Tools Menu
+        tools_menu = menubar.addMenu("Tools")
+        tools_menu.addAction(self.tele_act)
+        tools_menu.addAction(self.clipboard_act)
+        tools_menu.addAction(self.ghost_click_act)
+
+        # Help Menu
+        help_menu = menubar.addMenu("Help")
+        shortcuts_act = QAction("Keyboard Shortcuts", self)
+        shortcuts_act.setShortcut("F1")
+        shortcuts_act.triggered.connect(self.show_shortcuts_dialog)
+        help_menu.addAction(shortcuts_act)
+        
+        help_menu.addSeparator()
+        update_act = QAction("Check for Updates", self)
+        update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
+        help_menu.addAction(update_act)
+
     def setup_tray(self):
-        from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
-        from PyQt6.QtGui import QIcon, QAction
-        import os
-        
         self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.windowIcon())
         
-        # Icon
-        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "appnote.png")
-        if os.path.exists(icon_path):
-             self.tray_icon.setIcon(QIcon(icon_path))
-        else:
-             # Fallback or standard icon
-             self.tray_icon.setIcon(self.windowIcon())
-             
-        # Menu
         tray_menu = QMenu()
-        
         show_act = QAction("Show/Hide", self)
         show_act.triggered.connect(self.toggle_visibility)
         tray_menu.addAction(show_act)
         
         tray_menu.addSeparator()
-        
         quit_act = QAction("Quit", self)
         quit_act.triggered.connect(self.quit_app)
         tray_menu.addAction(quit_act)
@@ -83,412 +333,12 @@ class MainWindow(QMainWindow):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
-        
+
+
     def on_tray_activated(self, reason):
-        from PyQt6.QtWidgets import QSystemTrayIcon
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.toggle_visibility()
 
-    def quit_app(self):
-        self.save_app_state() # Ensure save on tray quit
-        self.force_quit = True
-        from PyQt6.QtWidgets import QApplication
-        QApplication.quit()
-
-    def setup_ui(self):
-        # Central Widget (Hidden/Empty to allow docks to take over)
-        central = QWidget()
-        central.hide()
-        self.setCentralWidget(central)
-        
-        # Dock Nesting
-        self.setDockNestingEnabled(True)
-
-        # Toolbar
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setMovable(False)
-        toolbar.setFloatable(False)
-        self.addToolBar(toolbar)
-
-        # Note Action
-        note_act = QAction("📝 + Note", self)
-        note_act.triggered.connect(lambda: self.add_note_dock())
-        toolbar.addAction(note_act)
-
-        # Browser Action
-        browser_act = QAction("🌐 + Browser", self)
-        browser_act.triggered.connect(lambda: self.add_browser_dock())
-        toolbar.addAction(browser_act)
-
-        # Formatting
-        toolbar.addSeparator()
-        
-        bold_act = QAction("B", self)
-        bold_act.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        bold_act.triggered.connect(lambda: self.apply_format("bold"))
-        toolbar.addAction(bold_act)
-        
-        italic_act = QAction("I", self)
-        italic_act.setFont(QFont("Segoe UI", 9, -1, True))
-        italic_act.triggered.connect(lambda: self.apply_format("italic"))
-        toolbar.addAction(italic_act)
-        
-        underline_act = QAction("U", self)
-        underline_act.triggered.connect(lambda: self.apply_format("underline"))
-        f = underline_act.font()
-        f.setUnderline(True)
-        underline_act.setFont(f)
-        toolbar.addAction(underline_act)
-        
-        toolbar.addSeparator()
-        
-        list_act = QAction("List", self)
-        list_act.triggered.connect(lambda: self.apply_format("list"))
-        toolbar.addAction(list_act)
-        
-        check_act = QAction("☑ Todo", self)
-        check_act.triggered.connect(lambda: self.apply_format("checkbox"))
-        toolbar.addAction(check_act)
-        
-        code_act = QAction("</>", self)
-        code_act.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
-        code_act.triggered.connect(lambda: self.apply_format("code"))
-        toolbar.addAction(code_act)
-        
-        # We can't easily style QAction icon without QIcon. 
-        # Just use the unicode char for now.
-        highlight_act = QAction("🖍 Highlight", self)
-        highlight_act.triggered.connect(lambda: self.apply_format("highlight"))
-        toolbar.addAction(highlight_act)
-        
-        toolbar.addSeparator()
-        
-        # Image Insert
-        image_act = QAction("📷 Image", self)
-        image_act.triggered.connect(lambda: self.insert_image_to_active_note())
-        toolbar.addAction(image_act)
-        
-        toolbar.addSeparator()
-        
-        search_act = QAction("🔍", self)
-        search_act.triggered.connect(self.show_find_dialog)
-        toolbar.addAction(search_act)
-        
-        toolbar.addSeparator()
-        
-        # Opacity Slider (Ghost Mode)
-        from PyQt6.QtWidgets import QSlider
-        opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        opacity_slider.setRange(20, 100) # Min 20% to avoid lost window
-        opacity_slider.setValue(100)
-        opacity_slider.setFixedWidth(100)
-        opacity_slider.setToolTip("Ghost Mode: Adjust Window Opacity")
-        opacity_slider.valueChanged.connect(self.change_window_opacity)
-        toolbar.addWidget(opacity_slider)
-        
-        self.opacity_slider = opacity_slider
-        
-        self.setup_menu()
-
-    def setup_menu(self):
-        menubar = self.menuBar()
-        view_menu = menubar.addMenu("View")
-        
-        # Theme Submenu
-        theme_menu = view_menu.addMenu("Theme")
-        dark_act = QAction("Dark Mode", self)
-        dark_act.triggered.connect(lambda: self.apply_theme("dark"))
-        theme_menu.addAction(dark_act)
-        
-        light_act = QAction("Light Mode", self)
-        light_act.triggered.connect(lambda: self.apply_theme("light"))
-        theme_menu.addAction(light_act)
-        
-        # Help Menu
-        help_menu = menubar.addMenu("Help")
-        update_act = QAction("Check for Updates", self)
-        update_act.triggered.connect(lambda: self.check_for_updates(manual=True))
-        help_menu.addAction(update_act)
-        
-        view_menu.addSeparator()
-        
-        self.stealth_action = QAction("Super Stealth (Anti-Capture)", self)
-        self.stealth_action.setCheckable(True)
-        self.stealth_action.setChecked(True)
-        self.stealth_action.setToolTip("Hides window from Screen Share/Recording (You can still see it)")
-        self.stealth_action.setShortcut("Ctrl+Shift+S")
-        self.stealth_action.triggered.connect(self.toggle_stealth)
-        view_menu.addAction(self.stealth_action)
-        
-        self.top_action = QAction("Always on Top", self)
-        self.top_action.setCheckable(True)
-        self.top_action.setChecked(True)
-        self.top_action.triggered.connect(self.toggle_always_on_top)
-        view_menu.addAction(self.top_action)
-        
-        self.toggle_always_on_top(True)
-        self.apply_theme("dark") # Default
-
-    def apply_theme(self, mode):
-        if mode == "dark":
-            style = """
-                QMainWindow, QDockWidget { background: #2b2b2b; color: #eee; }
-                QTextEdit { background: #333; color: #eee; border: none; }
-                QToolBar { background: #222; border-bottom: 1px solid #444; spacing: 5px; }
-                QDockWidget::title { background: #222; padding: 5px; }
-                QMenuBar { background: #222; color: #eee; }
-                QMenuBar::item:selected { background: #444; }
-                QMenu { background: #333; color: #eee; }
-                QMenu::item:selected { background: #555; }
-            """
-        else:
-            style = """
-                QMainWindow, QDockWidget { background: #f5f5f5; color: #000; }
-                QTextEdit { background: #fff; color: #000; border: none; }
-                QToolBar { background: #e0e0e0; border-bottom: 1px solid #ccc; spacing: 5px; }
-                QDockWidget::title { background: #e0e0e0; padding: 5px; }
-                QMenuBar { background: #e0e0e0; color: #000; }
-                QMenuBar::item:selected { background: #ccc; }
-                QMenu { background: #fff; color: #000; }
-                QMenu::item:selected { background: #ddd; }
-            """
-        self.setStyleSheet(style)
-        
-        # Propagate to panes if needed
-        for dock in self.dock_widgets:
-            widget = dock.widget()
-            if isinstance(widget, NotePane):
-                # NotePane has its own styleSheet in __init__, we might need to override it 
-                # or make sure global style applies.
-                # Global style usually applies if local not strictly set.
-                # Let's force update or reset NotePane style.
-                if mode == "dark":
-                     widget.setStyleSheet("""
-                        QTextEdit { background-color: #333; color: #eee; font-family: 'Segoe UI'; font-size: 14px; border: none; padding: 10px; }
-                     """)
-                else:
-                     widget.setStyleSheet("""
-                        QTextEdit { 
-                            background-color: #ffffff; 
-                            color: #000000; 
-                            font-family: 'Segoe UI'; 
-                            font-size: 14px; 
-                            border: none; 
-                            padding: 10px; 
-                            selection-background-color: #0078d7;
-                            selection-color: #ffffff;
-                        }
-                     """)
-
-    def add_note_dock(self, content="", title=None, obj_name=None):
-        count = len(self.dock_widgets) + 1
-        name = obj_name if obj_name else f"NoteDock_{count}_{Qt.GlobalColor.black}" # Unique ID better
-        # Simple unique ID generation could be better, but count works if we save sequentially
-        # Better: use timestamp or uuid if needed, but for now strict ordering is ok if we save cleanly
-        
-        if not title:
-            title = f"Note {count}"
-            
-        dock = QDockWidget(title, self)
-        dock.setObjectName(name) # Important for saveState
-        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        # Disable floating to keep stealth simple
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
-                         QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        
-        note_pane = NotePane()
-        if content:
-            note_pane.setHtml(content)
-        
-        # Track focus
-        note_pane.focus_received.connect(self.set_active_pane)
-        
-        dock.setWidget(note_pane)
-        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, dock)
-        
-        self.dock_widgets.append(dock)
-        
-        # Connect close event to remove from list? 
-        # QDockWidget close just hides it by default usually, unless attribute set.
-        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dock.destroyed.connect(lambda: self.dock_widgets.remove(dock) if dock in self.dock_widgets else None)
-        
-        return dock
-
-    def set_active_pane(self, pane):
-        self.active_pane = pane
-
-    def apply_format(self, fmt_type):
-        if self.active_pane:
-            self.active_pane.apply_format(fmt_type)
-        elif self.dock_widgets:
-            # Fallback to last added or first
-            self.dock_widgets[-1].widget().apply_format(fmt_type)
-            
-    def insert_image_to_active_note(self):
-        """Insert image into the currently focused note"""
-        if self.active_pane and hasattr(self.active_pane, 'insert_image_from_file'):
-            self.active_pane.insert_image_from_file()
-
-    def add_browser_dock(self, url=None, title="Mini Browser", obj_name=None):
-        count = len(self.dock_widgets) + 1
-        name = obj_name if obj_name else f"BrowserDock_{count}"
-        
-        dock = QDockWidget(title, self)
-        dock.setObjectName(name)
-        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
-                         QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        
-        browser = BrowserPane()
-        if url:
-            browser.browser.setUrl(QUrl(url))
-            
-        dock.setWidget(browser)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self.dock_widgets.append(dock)
-        
-        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dock.destroyed.connect(lambda: self.dock_widgets.remove(dock) if dock in self.dock_widgets else None)
-        
-        return dock
-
-    def add_ai_dock(self, title="AI Copilot", obj_name="AIDock_Main"):
-        # Check if already exists? Maybe allow only one AI dock
-        existing = self.findChild(QDockWidget, obj_name)
-        if existing:
-            existing.show()
-            existing.raise_()
-            return existing
-            
-        dock = QDockWidget(title, self)
-        dock.setObjectName(obj_name)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
-                         QDockWidget.DockWidgetFeature.DockWidgetClosable)
-        
-        pane = AIPane()
-        dock.setWidget(pane)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self.dock_widgets.append(dock)
-        
-        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dock.destroyed.connect(lambda: self.dock_widgets.remove(dock) if dock in self.dock_widgets else None)
-        return dock
-
-
-
-    # ... setup_stealth ...
-
-    def save_app_state(self):
-        # 1. Config (INI) - Layout & Geometry
-        self.config.set_value("window/geometry", self.saveGeometry())
-        self.config.set_value("window/dock_state", self.saveState())
-        
-        # 2. Data (JSON) - Content
-        from src.core.storage import StorageManager
-        storage = StorageManager()
-        
-        notes_data = []
-        browser_data = []
-        
-        for dock in self.dock_widgets:
-            # Save even if hidden, so we don't lose data of closed docks if we wanted to persist them?
-            # Actually, if user closed it, maybe they want it gone. 
-            # But "stealth" app usually persists everything. 
-            # Let's save all valid docks in the list.
-            if not dock.widget(): continue
-            
-            widget = dock.widget()
-            if isinstance(widget, NotePane):
-                notes_data.append({
-                    "obj_name": dock.objectName(),
-                    "title": dock.windowTitle(),
-                    "content": widget.toHtml()
-                })
-            elif isinstance(widget, BrowserPane):
-                browser_data.append({
-                    "obj_name": dock.objectName(),
-                    "title": dock.windowTitle(),
-                    "url": widget.browser.url().toString()
-                })
-                
-        full_data = {
-            "notes": notes_data,
-            "browsers": browser_data,
-            "theme": "dark" # TODO: track actual theme state
-        }
-        
-        storage.save_data(full_data)
-
-    def restore_app_state(self):
-        # 1. Load Data (JSON)
-        from src.core.storage import StorageManager
-        storage = StorageManager()
-        data = storage.load_data()
-        
-        # Restore Notes
-        notes_list = data.get("notes", [])
-        for item in notes_list:
-            dock = self.add_note_dock(title=item.get("title", "Note"), 
-                                      obj_name=item.get("obj_name"))
-            if dock and dock.widget():
-                dock.widget().setHtml(item.get("content", ""))
-                
-        # Restore Browsers
-        browser_list = data.get("browsers", [])
-        for item in browser_list:
-            dock = self.add_browser_dock(title=item.get("title", "Browser"),
-                                         obj_name=item.get("obj_name"))
-            if dock and dock.widget():
-                dock.widget().load_url(item.get("url", "https://google.com"))
-
-        # 2. Restore Layout & Geometry (INI)
-        # MUST be done AFTER adding docks, otherwise restoreState won't find the docks to place.
-        geo = self.config.get_value("window/geometry")
-        if geo:
-            try:
-                self.restoreGeometry(bytes.fromhex(geo))
-            except Exception:
-                pass
-                
-        state = self.config.get_value("window/dock_state")
-        if state:
-            self.restoreState(state)
-
-    def closeEvent(self, event):
-        self.save_app_state()
-        
-        if getattr(self, "force_quit", False):
-            QMainWindow.closeEvent(self, event)
-        else:
-            event.ignore()
-            self.hide()
-            self.tray_icon.showMessage("Stealth Assist", "App is running in background.", 
-                                       self.tray_icon.MessageIcon.Information, 2000)
-
-    # ... Stealth methods ...
-    def setup_stealth(self):
-        # Global Hotkey listener
-        import keyboard
-        import threading
-        
-        def check_hotkey():
-            # Toggle visibility on Ctrl+Shift+Space
-            keyboard.add_hotkey('ctrl+shift+space', self.toggle_visibility_safe)
-            keyboard.wait()
-            
-        # Run in daemon thread
-        threading.Thread(target=check_hotkey, daemon=True).start()
-
-    def toggle_visibility_safe(self):
-        # Keyboard callback runs in different thread, need to emit signal or use invokes
-        # PyQt is not thread safe for UI updates from other threads directly usually, 
-        # but simple show/hide might work or crash. Better use QMetaObject.invokeMethod.
-        from PyQt6.QtCore import QMetaObject, Q_ARG
-        QMetaObject.invokeMethod(self, "toggle_visibility", Qt.ConnectionType.QueuedConnection)
-
-    from PyQt6.QtCore import pyqtSlot
-    @pyqtSlot()
     def toggle_visibility(self):
         if self.isVisible():
             self.hide()
@@ -497,22 +347,315 @@ class MainWindow(QMainWindow):
             self.activateWindow()
             self.raise_()
 
-    def change_window_opacity(self, value):
-        opacity = value / 100.0
-        self.setWindowOpacity(opacity)
+    def quit_app(self):
+        self.save_app_state()
+        QApplication.quit()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if self.stealth_action.isChecked():
-            self.toggle_stealth(True)
+    def apply_theme(self, mode):
+        self.current_theme = mode
+        if hasattr(self, 'branding'):
+            self.branding.update()
+            
+        # Get path for close icon to use in CSS
+        folder = "dark_theme" if mode == "dark" else "light_theme"
+        close_icon_url = os.path.join(self.base_path, "assets", "icons", folder, "close.svg").replace("\\", "/")
 
-    def toggle_stealth(self, checked):
-        hwnd = int(self.winId())
-        StealthManager.set_stealth_mode(hwnd, checked)
-        if checked:
-            self.statusBar().showMessage("Stealth Enabled", 2000)
+        
+        if mode == "dark":
+            style = f"""
+                QMainWindow, QDockWidget {{ background: #2b2b2b; color: #eeeeee; }}
+                QTextEdit, NotePane {{ background: #333333; color: #eeeeee; border: none; font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 6px; }}
+                QToolBar {{ background: #1e1e1e; border-bottom: 1px solid #333; spacing: 4px; padding: 2px; min-height: 26px; }}
+                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #eeeeee; }}
+                QToolButton:hover {{ background: #3a3a3a; }}
+                QMenuBar {{ background: #1e1e1e; color: #eeeeee; border-bottom: 1px solid #333; padding: 2px; }}
+                QMenuBar::item {{ padding: 4px 8px; }}
+                QMenuBar::item:selected {{ background: #3a3a3a; }}
+                QMenu {{ background: #2b2b2b; color: #eeeeee; padding: 4px; border: 1px solid #444; }}
+                QMenu::item:selected {{ background: #3c3c3c; }}
+                QStatusBar {{ background: #2b2b2b; color: #eeeeee; border-top: 1px solid #444; min-height: 18px; }}
+                QStatusBar QLabel {{ color: #eeeeee; font-size: 11px; padding: 0px 4px; }}
+                
+                QTabBar {{
+                    background: #1e1e1e;
+                    border-bottom: 1px solid #333;
+                }}
+                QTabBar::tab {{
+                    background: #252525;
+                    color: #888888;
+                    padding: 2px 16px 2px 8px; /* Hyper-compact */
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                    margin-right: 1px;
+                    min-width: 50px;
+                    font-size: 11px;
+                    border: 1px solid transparent;
+                }}
+                QTabBar::tab:selected {{
+                    background: #333333;
+                    color: #eeeeee;
+                    border-bottom: 2px solid #3498db;
+                }}
+                QTabBar::tab:hover {{
+                    background: #2a2a2a;
+                    color: #cccccc;
+                }}
+                
+                QTabBar::close-button {{
+                    image: url("{close_icon_url}");
+                    subcontrol-position: right;
+                    margin-right: 2px;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: transparent;
+                }}
+                QTabBar::close-button:hover {{
+                    background-color: #ff5f56;
+                }}
+            """
         else:
-            self.statusBar().showMessage("Stealth Disabled", 2000)
+            style = f"""
+                QMainWindow, QDockWidget {{ background: #ffffff; color: #333333; }}
+                QTextEdit, NotePane {{ background: #ffffff; color: #333333; border: none; font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 6px; }}
+                QToolBar {{ background: #f3f4f6; border-bottom: 1px solid #e5e7eb; spacing: 4px; padding: 2px; min-height: 26px; }}
+                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #333333; }}
+                QToolButton:hover {{ background: #e5e7eb; }}
+                QMenuBar {{ background: #f3f4f6; color: #333333; border-bottom: 1px solid #e5e7eb; padding: 2px; }}
+                QMenuBar::item {{ padding: 4px 8px; }}
+                QMenuBar::item:selected {{ background: #e5e7eb; }}
+                QMenu {{ background: #ffffff; color: #333333; padding: 4px; border: 1px solid #e5e7eb; }}
+                QMenu::item:selected {{ background: #f3f4f6; }}
+                QStatusBar {{ background: #ffffff; color: #333333; border-top: 1px solid #e5e7eb; min-height: 18px; }}
+                QStatusBar QLabel {{ color: #333333; font-size: 11px; padding: 0px 4px; }}
+                
+                QTabBar {{
+                    background: #f3f4f6;
+                    border-bottom: 1px solid #e5e7eb;
+                }}
+                QTabBar::tab {{
+                    background: #e5e7eb;
+                    color: #666666;
+                    padding: 2px 16px 2px 8px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                    margin-right: 1px;
+                    min-width: 50px;
+                    font-size: 11px;
+                    border: 1px solid transparent;
+                }}
+                QTabBar::tab:selected {{
+                    background: #ffffff;
+                    color: #333333;
+                    border-bottom: 2px solid #3498db;
+                }}
+                QTabBar::tab:hover {{
+                    background: #ececec;
+                    color: #333333;
+                }}
+                
+                QTabBar::close-button {{
+                    image: url("{close_icon_url}");
+                    subcontrol-position: right;
+                    margin-right: 2px;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: transparent;
+                }}
+                QTabBar::close-button:hover {{
+                    background-color: #ff5f56;
+                }}
+            """
+        self.setStyleSheet(style)
+        self.update_icons()
+
+
+
+    def update_icons(self):
+        actions = [
+            ("note.svg", self.note_act), ("browser.svg", self.browser_act),
+            ("teleprompter.svg", self.tele_act), ("folder-open.svg", self.open_act),
+            ("clipboard.svg", self.clipboard_act), ("bold.svg", self.bold_act),
+            ("italic.svg", self.italic_act), ("underline.svg", self.underline_act),
+            ("list.svg", self.list_act), ("check.svg", self.check_act),
+            ("code.svg", self.code_act), ("highlight.svg", self.highlight_act),
+            ("image.svg", self.image_act), ("search.svg", self.search_act)
+        ]
+        for icon_name, action in actions:
+            action.setIcon(self._get_icon(icon_name))
+        
+        if hasattr(self, 'label_ghost'):
+            self.label_ghost.setPixmap(self._get_icon("ghost.svg").pixmap(16, 16))
+
+    def _get_icon(self, filename):
+        folder = "dark_theme" if self.current_theme == "dark" else "light_theme"
+        path = os.path.join(self.base_path, "assets", "icons", folder, filename)
+        return QIcon(path) if os.path.exists(path) else QIcon()
+
+    def update_branding_visibility(self):
+        """Show branding only when no docks are visible."""
+        # Clean list and check for visible docks
+        visible_docks = []
+        valid_docks = []
+        
+        for dock in self.dock_widgets:
+            try:
+                # Only count if it's not floating and is visible
+                if dock.isVisible() and not dock.isFloating():
+                    visible_docks.append(dock)
+                elif dock.isFloating() and dock.isVisible():
+                    # Floating docks shouldn't necessarily hide the branding? 
+                    # Actually they should probably count as "using the app".
+                    visible_docks.append(dock)
+                    
+                valid_docks.append(dock)
+            except RuntimeError:
+                # C++ object deleted
+                pass
+                
+        self.dock_widgets = valid_docks
+        
+        logging.info(f"Branding Check: {len(visible_docks)} visible docks out of {len(valid_docks)} total.")
+        
+        if visible_docks:
+            self.branding.hide()
+        else:
+            if self.centralWidget() != self.branding:
+                self.setCentralWidget(self.branding)
+            self.branding.show()
+            self.branding.update() # Force repaint
+
+    def check_docks_closed(self):
+        self.update_branding_visibility()
+
+    # --- Dock Management ---
+    def add_note_dock(self, content="", title=None, obj_name=None):
+        dock = self.dock_manager.add_note_dock(content, title, obj_name)
+        return dock
+
+    def add_browser_dock(self, url=None):
+        dock = self.dock_manager.add_browser_dock(url)
+        return dock
+
+
+
+
+
+    def add_clipboard_dock(self):
+        self.dock_manager.add_clipboard_dock(self.clipboard_manager)
+
+    def set_active_pane(self, pane):
+        self.active_pane = pane
+
+    def apply_format(self, fmt_type):
+        if self.active_pane:
+            self.active_pane.apply_format(fmt_type)
+
+    def insert_image_to_active_note(self):
+        if self.active_pane and hasattr(self.active_pane, 'insert_image_from_file'):
+            self.active_pane.insert_image_from_file()
+
+    # --- Persistence ---
+    def save_current_work(self):
+        """Manual save triggered by user"""
+        self.save_app_state()
+        self.statusBar().showMessage("Saved successfully!", 2000)
+
+    def save_app_state(self):
+        # Convert QByteArray to Hex string for stable INI storage
+        self.config.set_value("window/geometry", str(self.saveGeometry().toHex(), 'utf-8'))
+        self.config.set_value("window/dock_state_v4", str(self.saveState().toHex(), 'utf-8'))
+        
+        storage = StorageManager()
+        notes_data = []
+        browser_data = []
+        
+        for dock in self.dock_widgets:
+            try:
+                widget = dock.widget()
+                if not widget: continue
+                if isinstance(widget, NotePane):
+                    notes_data.append({"obj_name": dock.objectName(), "title": dock.windowTitle(), "content": widget.toHtml()})
+                elif isinstance(widget, BrowserPane):
+                    browser_data.append({"obj_name": dock.objectName(), "title": dock.windowTitle(), "url": widget.browser.url().toString()})
+            except RuntimeError:
+                continue
+                
+        storage.save_data({"notes": notes_data, "browsers": browser_data})
+
+    def restore_app_state(self):
+        logging.info("Starting restore_app_state...")
+        storage = StorageManager()
+        data = storage.load_data()
+        
+        # 1. AGGRESSIVE CLEANUP: Find ALL QDockWidgets, not just tracked ones
+        # This fixes the "Ghost Dock" accumulation issue (Note 38, Browser 28, etc.)
+        for dock in self.findChildren(QDockWidget):
+            try:
+                dock.close()
+                dock.setParent(None)
+                dock.deleteLater()
+            except RuntimeError:
+                pass
+        self.dock_widgets.clear()
+        
+        # 2. Fresh install check
+        is_fresh = not data
+        
+        # 3. Restore Notes (Limit to 5 to prevent overflow)
+        notes = data.get("notes", [])
+        if is_fresh:
+            self.add_note_dock()
+        else:
+            for i, item in enumerate(notes):
+                if i >= 5: break # Safety Cap
+                dock = self.add_note_dock(title=item.get("title"), obj_name=item.get("obj_name"))
+                if dock and dock.widget():
+                    try:
+                        dock.widget().setHtml(item.get("content", ""))
+                    except RuntimeError:
+                        pass
+        
+        # 4. Restore Browsers (Limit to 5)
+        for i, item in enumerate(data.get("browsers", [])):
+            if i >= 5: break # Safety Cap
+            dock = self.add_browser_dock()
+            if dock and dock.widget():
+                try:
+                    dock.widget().load_url(item.get("url", "https://google.com"))
+                except RuntimeError:
+                    pass
+
+        # GUI State
+        try:
+            geo = self.config.get_value("window/geometry")
+            if geo:
+                if isinstance(geo, str):
+                    self.restoreGeometry(QByteArray.fromHex(geo.encode()))
+                else:
+                    self.restoreGeometry(geo)
+        except Exception as e:
+            logging.error(f"Failed to restore geometry: {e}")
+            
+        try:
+            state = self.config.get_value("window/dock_state_v4")
+            if state:
+                if isinstance(state, str):
+                    self.restoreState(QByteArray.fromHex(state.encode()))
+                else:
+                    self.restoreState(state)
+        except Exception as e:
+            logging.error(f"Failed to restore state: {e}")
+        
+        # Cleanup
+        self.update_branding_visibility()
+        for dock in self.dock_widgets:
+            try:
+                dock.setFloating(False)
+            except RuntimeError:
+                pass
+
 
     def show_find_dialog(self):
         if not self.active_pane:
@@ -521,80 +664,312 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QInputDialog
         text, ok = QInputDialog.getText(self, "Find in Note", "Search text:")
         if ok and text:
-             # Find in active pane (QTextEdit)
-             # QTextEdit.find() returns bool
-             found = self.active_pane.find(text)
-             if not found:
-                 # Try from beginning
-                 # Move cursor to start
-                 from PyQt6.QtGui import QTextCursor
-                 start_cursor = self.active_pane.textCursor()
-                 start_cursor.movePosition(QTextCursor.MoveOperation.Start)
-                 self.active_pane.setTextCursor(start_cursor)
-                 if not self.active_pane.find(text):
-                      self.statusBar().showMessage(f"'{text}' not found.", 2000)
+            # Find in active pane (QTextEdit)
+            from PyQt6.QtGui import QTextDocument
+            found = self.active_pane.find(text)
+            if not found:
+                # Try from beginning
+                from PyQt6.QtGui import QTextCursor
+                start_cursor = self.active_pane.textCursor()
+                start_cursor.movePosition(QTextCursor.MoveOperation.Start)
+                self.active_pane.setTextCursor(start_cursor)
+                if not self.active_pane.find(text):
+                    self.statusBar().showMessage(f"'{text}' not found.", 2000)
 
-    def toggle_always_on_top(self, checked):
-        flags = self.windowFlags()
-        # Ensure Tool flag is always present to keep it hidden from taskbar
-        flags |= Qt.WindowType.Tool
+    # --- Utils ---
+
+    def setup_stealth(self):
+        # Initialize Global Stealth Filter
+        from src.core.stealth import StealthEventFilter
+        self.stealth_filter = StealthEventFilter(StealthManager, False)
+        QApplication.instance().installEventFilter(self.stealth_filter)
+
+        import keyboard
+        def check_hotkey():
+            keyboard.add_hotkey('ctrl+shift+space', lambda: QMetaObject.invokeMethod(self, "toggle_visibility", Qt.ConnectionType.QueuedConnection))
+            keyboard.add_hotkey('ctrl+shift+f9', lambda: QMetaObject.invokeMethod(self, "toggle_ghost_click_external", Qt.ConnectionType.QueuedConnection))
+            keyboard.wait()
+        threading.Thread(target=check_hotkey, daemon=True).start()
         
-        if checked:
+        # Apply initial stealth state after window is shown
+        QTimer.singleShot(1000, lambda: self.toggle_stealth(self.stealth_action.isChecked()))
+
+    def toggle_stealth(self, checked):
+        # Update global filter state
+        if hasattr(self, 'stealth_filter'):
+            self.stealth_filter.set_enabled(checked)
+            
+        # Apply to Main Window
+        StealthManager.set_stealth_mode(int(self.winId()), checked)
+        
+        # Apply to all other top-level windows (Floating Docks, Browsers, Tooltips that exist)
+        StealthManager.apply_to_all_windows(QApplication.instance(), checked)
+        
+        self.statusBar().showMessage("Stealth " + ("Enabled" if checked else "Disabled"), 2000)
+
+    @pyqtSlot()
+    def toggle_ghost_click_external(self):
+        # Priority: If Teleprompter is open, toggle IT instead of Main Window
+        if hasattr(self, 'teleprompter') and self.teleprompter and self.teleprompter.isVisible():
+            # Toggle the button state directly to keep UI in sync
+            self.teleprompter.btn_click_through.click()
+            return
+
+        new_state = not self.ghost_click_act.isChecked()
+        self.ghost_click_act.setChecked(new_state)
+        self.toggle_ghost_click(new_state)
+
+    def toggle_ghost_click(self, checked):
+        if StealthManager.set_click_through(int(self.winId()), checked):
+            self.statusBar().showMessage("Ghost Click " + ("Enabled" if checked else "Disabled"), 2000)
+        else:
+            self.ghost_click_act.setChecked(not checked)
+
+
+
+    def toggle_always_on_top(self):
+        on_top = self.top_action.isChecked()
+        flags = self.windowFlags()
+        if on_top:
             flags |= Qt.WindowType.WindowStaysOnTopHint
         else:
             flags &= ~Qt.WindowType.WindowStaysOnTopHint
+            
+        # IMPORTANT: Do not use Qt.WindowType.Tool as it hides the taskbar icon
+        # flags &= ~Qt.WindowType.Tool 
+        
         self.setWindowFlags(flags)
-        
         self.show()
-    def check_for_updates(self, manual=False):
-        """Check GitHub for new releases and show update dialog"""
-        from PyQt6.QtWidgets import QMessageBox
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
-        from src.core.version import check_for_updates, CURRENT_VERSION
-        
-        if manual:
-            self.statusBar().showMessage("Checking for updates...", 3000)
-        
-        has_update, latest_version, download_url, error = check_for_updates()
-        
-        if error:
-            if manual:
-                QMessageBox.warning(self, "Update Check Failed", f"Could not check for updates:\n{error}")
-            return
-        
-        if has_update:
-            # 1. Update Window Title
-            self.setWindowTitle(f"Stealth Assist {CURRENT_VERSION} (🚀 Update v{latest_version} Available!)")
-            
-            # 2. Add Update Button to Toolbar if not already there
-            if not hasattr(self, 'update_action'):
-                self.update_action = QAction("🚀 Update Now", self)
-                self.update_action.setStyleSheet("background-color: #28a745; color: white; font-weight: bold;") # Style hint
-                self.update_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl(download_url)))
-                
-                # Find toolbar and add action
-                toolbar = self.findChild(QToolBar)
-                if toolbar:
-                    toolbar.addSeparator()
-                    toolbar.addAction(self.update_action)
-            
-            if manual:
-                 reply = QMessageBox.question(
-                    self,
-                    "Update Available",
-                    f"A new version is available!\n\n"
-                    f"Current version: {CURRENT_VERSION}\n"
-                    f"Latest version: {latest_version}\n\n"
-                    f"Would you like to download it?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                )
-                 if reply == QMessageBox.StandardButton.Yes:
-                    QDesktopServices.openUrl(QUrl(download_url))
+
+    def toggle_autosave(self):
+        """Toggles the auto-save timer based on user action."""
+        enabled = self.autosave_act.isChecked()
+        if enabled:
+            if not self.autosave_timer.isActive():
+                self.autosave_timer.start()
+            self.statusBar().showMessage("Auto-Save Enabled", 2000)
         else:
-            if manual:
-                QMessageBox.information(
-                    self,
-                    "No Updates",
-                    f"You are using the latest version ({CURRENT_VERSION})."
-                )
+            if self.autosave_timer.isActive():
+                self.autosave_timer.stop()
+            self.statusBar().showMessage("Auto-Save Disabled", 2000)
+            
+        # Save preference
+        self.config.set_value("app/autosave_enabled", enabled)
+
+    def change_window_opacity(self, value):
+        self.setWindowOpacity(value / 100.0)
+
+    def open_file_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Supported Files (*.txt *.docx *.md *.py *.js *.html);;All Files (*)")
+        if path:
+            content = UniversalReader.read_file(path)
+            if content:
+                self.add_note_dock(content=content.replace("\n", "<br>"), title=os.path.basename(path))
+
+    def show_shortcuts_dialog(self):
+        QMessageBox.information(self, "Shortcuts", "Ctrl+N: Note\nCtrl+Shift+B: Browser\nCtrl+Shift+P: Prompter\nCtrl+Shift+S: Stealth\nCtrl+Shift+F9: Ghost Click")
+
+    def open_teleprompter(self):
+        content = self.active_pane.toHtml() if self.active_pane else ""
+        self.teleprompter = TeleprompterDialog(content, None)
+        self.teleprompter.show()
+
+    def check_for_updates(self, manual=True):
+        has_update, latest_version, url, error = check_for_updates()
+        if has_update:
+            QMessageBox.information(self, "Update", f"v{latest_version} available at {url}")
+        elif manual:
+            QMessageBox.information(self, "Update", "Up to date!")
+
+    def rename_active_note(self):
+        """Standard rename method (useful for shortcut)"""
+        if not self.active_pane:
+            return
+            
+        # Find which dock this pane belongs to
+        for dock in self.dock_widgets:
+            if dock.widget() == self.active_pane:
+                self._show_rename_dialog(dock)
+                break
+
+    def _show_rename_dialog(self, dock):
+        from PyQt6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(self, "Rename Note", "New name:", text=dock.windowTitle())
+        if ok and new_name.strip():
+            dock.setWindowTitle(new_name.strip())
+            self.save_app_state()
+
+    def hook_tab_bars(self):
+        """Finds all QTabBars in the window and connects to their signals."""
+        from PyQt6.QtWidgets import QTabBar
+        if not hasattr(self, '_hooked_tabbars'):
+            self._hooked_tabbars = set()
+            
+        for tab_bar in self.findChildren(QTabBar):
+            # Force tooltips to be the full tab text (for truncated tabs)
+            for i in range(tab_bar.count()):
+                text = tab_bar.tabText(i)
+                if tab_bar.tabToolTip(i) != text:
+                    tab_bar.setTabToolTip(i, text)
+
+            if tab_bar not in self._hooked_tabbars:
+                tab_bar.tabBarDoubleClicked.connect(lambda idx, tb=tab_bar: self.on_tab_double_clicked(tb, idx))
+                tab_bar.currentChanged.connect(lambda idx, tb=tab_bar: self.on_tab_changed(tb, idx))
+                
+                # Tab Closing Support
+                tab_bar.setTabsClosable(True)
+                tab_bar.tabCloseRequested.connect(lambda idx, tb=tab_bar: self.on_tab_close_requested(tb, idx))
+                
+                # Context Menu Support for Deletion
+                tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                tab_bar.customContextMenuRequested.connect(lambda pos, tb=tab_bar: self.on_tab_context_menu(tb, pos))
+                
+                self._hooked_tabbars.add(tab_bar)
+
+    def on_tab_close_requested(self, tab_bar, index):
+        """Called when the (x) button on a tab is clicked."""
+        self.close_dock_at_tab_index(tab_bar, index)
+
+    def on_tab_context_menu(self, tab_bar, pos):
+
+        """Shows right-click menu for tabs."""
+        index = tab_bar.tabAt(pos)
+        if index < 0:
+            return
+            
+        menu = QMenu(self)
+        rename_act = QAction("Rename Note", self)
+        rename_act.triggered.connect(lambda: self.on_tab_double_clicked(tab_bar, index))
+        
+        close_act = QAction("Close Note", self)
+        close_act.triggered.connect(lambda: self.close_dock_at_tab_index(tab_bar, index))
+        
+        menu.addAction(rename_act)
+        menu.addSeparator()
+        menu.addAction(close_act)
+        menu.exec(tab_bar.mapToGlobal(pos))
+
+
+
+    def close_dock_at_tab_index(self, tab_bar, index):
+        """Helper to find and remove a dock widget by its tab index."""
+        title = tab_bar.tabText(index)
+        dock_to_close = None
+        
+        # Find dock first safely
+        for dock in self.dock_widgets:
+            try:
+                if dock.windowTitle() == title and not dock.isFloating():
+                    dock_to_close = dock
+                    break
+            except RuntimeError:
+                continue
+                
+        if dock_to_close:
+            dock = dock_to_close
+            # Cleanup active pane reference if this dock is being closed
+            try:
+                if dock.widget() == self.active_pane:
+                    self.set_active_pane(None)
+            except RuntimeError:
+                self.set_active_pane(None)
+                
+            # Remove dock
+            try:
+                dock.close()
+                dock.deleteLater()
+            except RuntimeError:
+                pass
+                
+            if dock in self.dock_widgets:
+                self.dock_widgets.remove(dock)
+            
+            self.save_app_state()
+            self.update_branding_visibility()
+
+    def on_tab_changed(self, tab_bar, index):
+
+        """Called when a tab is selected."""
+        title = tab_bar.tabText(index)
+        for dock in self.dock_widgets:
+            if dock.windowTitle() == title and not dock.isFloating():
+                widget = dock.widget()
+                if isinstance(widget, NotePane):
+                    self.set_active_pane(widget)
+                else:
+                    self.set_active_pane(None)
+                break
+
+    def on_tab_double_clicked(self, tab_bar, index):
+        """Called when a tab is double-clicked."""
+        title = tab_bar.tabText(index)
+        for dock in self.dock_widgets:
+            if dock.windowTitle() == title and not dock.isFloating():
+                self._show_rename_dialog(dock)
+                return
+
+
+    def setup_status_bar_widgets(self):
+        """Initializes the labels in the status bar."""
+        from PyQt6.QtWidgets import QLabel
+        
+        # Create labels
+        self.status_pos_label = QLabel("Ln 1, Col 1")
+        self.status_char_label = QLabel("0 characters")
+        self.status_zoom_label = QLabel("100%")
+        self.status_eol_label = QLabel("Windows (CRLF)")
+        self.status_enc_label = QLabel("UTF-8")
+        
+        # Add to status bar (permanent right side)
+        sb = self.statusBar()
+        sb.addPermanentWidget(self.status_pos_label)
+        sb.addPermanentWidget(QLabel("  |  ")) # Separator
+        sb.addPermanentWidget(self.status_char_label)
+        sb.addPermanentWidget(QLabel("  |  "))
+        sb.addPermanentWidget(self.status_zoom_label)
+        sb.addPermanentWidget(QLabel("  |  "))
+        sb.addPermanentWidget(self.status_eol_label)
+        sb.addPermanentWidget(QLabel("  |  "))
+        sb.addPermanentWidget(self.status_enc_label)
+        sb.addPermanentWidget(QLabel("   ")) # Padding
+
+    def update_status_bar_info(self):
+        """Updates the status bar labels based on the active pane's content and cursor."""
+        if not self.active_pane:
+            self.status_pos_label.setText("")
+            self.status_char_label.setText("")
+            return
+            
+        try:
+            # Check if C++ object is still valid
+            if not self.active_pane.isVisible():
+                 pass # Fall through to try block, but sometimes isVisible fails too
+
+            # Get line/col
+            cursor = self.active_pane.textCursor()
+            line = cursor.blockNumber() + 1
+            col = cursor.columnNumber() + 1
+            self.status_pos_label.setText(f"Ln {line}, Col {col}")
+            
+            # Count chars
+            text = self.active_pane.toPlainText()
+            self.status_char_label.setText(f"{len(text)} characters")
+            
+            # Zoom
+            # self.status_zoom_label.setText(f"{self.active_pane.font().pointSize()}pt")
+            
+        except RuntimeError:
+            # Widget deleted
+            self.active_pane = None
+            self.status_pos_label.setText("")
+            self.status_char_label.setText("")
+        
+        # We can hardcode zoom/encoding for now unless we implement zoom/saving logic
+        # self.status_zoom_label.setText("100%")
+        # self.status_enc_label.setText("UTF-8")
+
+    def closeEvent(self, event):
+        self.save_app_state()
+        super().closeEvent(event)
+
+
