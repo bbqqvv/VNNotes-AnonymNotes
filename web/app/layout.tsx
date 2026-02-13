@@ -16,7 +16,13 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://stealthassist.vercel.app"),
   title: "Stealth Assist - The Invisible Workspace",
   description: "Privacy-focused note-taking and browsing tool for professionals. Invisible to screen sharing, local storage only.",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/icon-192.png",
+  },
   openGraph: {
+
 
     title: "Stealth Assist - The Invisible Workspace",
     description: "Privacy-focused note-taking and browsing tool for professionals.",
