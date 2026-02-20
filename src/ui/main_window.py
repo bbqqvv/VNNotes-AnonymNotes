@@ -6,28 +6,31 @@ import logging
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QDockWidget, QToolBar, 
                              QMessageBox, QLabel, QSizePolicy, QSlider,
-                             QSystemTrayIcon, QMenu, QApplication, QFileDialog)
+                             QSystemTrayIcon, QMenu, QApplication, QFileDialog, QTabWidget)
 from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor
 from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray
 from PyQt6 import QtCore
 
-from src.core.stealth import StealthManager
-from src.core.config import ConfigManager
-from src.core.storage import StorageManager
-from src.core.reader import UniversalReader
-from src.core.version import check_for_updates, CURRENT_VERSION
 from src.features.notes.note_pane import NotePane
-from src.features.browser.browser_pane import BrowserPane
-from src.features.teleprompter.teleprompter_dialog import TeleprompterDialog
 from src.features.clipboard.clipboard_manager import ClipboardManager
 from src.ui.branding import BrandingOverlay
 from src.ui.managers.dock_manager import DockManager
 from src.ui.managers.menu_toolbar_manager import MenuToolbarManager
+from src.ui.managers.find_manager import FindManager
+from src.ui.managers.visibility_manager import VisibilityManager
+from src.ui.managers.tab_manager import TabManager
+from src.ui.managers.dialog_manager import DialogManager
+from src.ui.managers.status_bar_manager import StatusBarManager
+from src.core.context import ServiceContext
+from src.core.session_manager import SessionManager
+from src.ui.sidebar import SidebarWidget
+from src.ui.managers.theme_manager import ThemeManager
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.config = ConfigManager()
+        self.ctx = ServiceContext.get_instance()
+        self.config = self.ctx.config
         self.setWindowTitle("VNNotes")
         
         # Paths
@@ -41,14 +44,29 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         
         # State
-        self.dock_widgets = []
         self.active_pane = None
-        self.current_theme = "dark"
+        self.current_theme = self.config.get_value("app/theme", "dark")
+        self.active_pane = None
+        self.current_theme = self.config.get_value("app/theme", "dark")
         
-        # Managers
+        # Core Managers
         self.dock_manager = DockManager(self)
         self.menu_manager = MenuToolbarManager(self)
+        self.theme_manager = ThemeManager(self, self.config, self.base_path)
+        self.session_manager = SessionManager(self, self.ctx)
         self.clipboard_manager = ClipboardManager()
+        self._is_restoring = False
+        
+        # Feature Managers (extracted for maintainability)
+        self.find_manager = FindManager(self)
+        self.visibility_manager = VisibilityManager(self)
+        self.tab_manager = TabManager(self)
+        self.dialog_manager = DialogManager(self)
+        self.status_bar_manager = StatusBarManager(self)
+        
+        # Shortcuts to services from context
+        self.note_service = self.ctx.notes
+        self.browser_service = self.ctx.browser
         
         # Setup UI
         self.setup_window()
@@ -58,48 +76,42 @@ class MainWindow(QMainWindow):
         
         # Final Setup
         self.setup_status_bar_widgets()
-        # self.restore_app_state() - Removed duplicate call
         
         # Dynamically hook into tab bars for double-click renaming
-
         self.tab_hook_timer = QTimer(self)
         self.tab_hook_timer.timeout.connect(self.hook_tab_bars)
-        self.tab_hook_timer.start(1000) # Check every second
+        self.tab_hook_timer.start(1000)
         
         # Periodic status bar updates
         self.status_update_timer = QTimer(self)
         self.status_update_timer.timeout.connect(self.update_status_bar_info)
-        self.status_update_timer.start(200) # Fast updates for char count/pos
+        self.status_update_timer.start(200)
 
         
         # Restore State
-        QTimer.singleShot(100, self.restore_app_state)
+        QTimer.singleShot(100, self.session_manager.restore_app_state)
         
-        # --- Auto-Save Timer ---
-        self.autosave_timer = QTimer(self)
-        self.autosave_timer.setInterval(60000) # 60 seconds
-        self.autosave_timer.timeout.connect(self.auto_save)
-        
-        # Load preference
-        autosave_enabled = self.config.get_value("app/autosave_enabled", True)
-        if isinstance(autosave_enabled, str):
-            autosave_enabled = autosave_enabled.lower() == 'true'
-            
-        autosave_act = self.menu_manager.actions.get("autosave")
-        if autosave_act:
-            autosave_act.setChecked(autosave_enabled)
-            
-        if autosave_enabled:
-            self.autosave_timer.start()
+        if self.session_manager:
+             self.session_manager.start_autosave()
 
         # Check for updates
         # QTimer.singleShot(3000, lambda: self.check_for_updates(manual=False))
 
     def auto_save(self):
-        """Background auto-save"""
-        self.save_app_state()
-        # Optional: Show subtle indicator? 
-        # self.statusBar().showMessage("Auto-saved", 1000)
+         self.session_manager.auto_save()
+
+    def toggle_autosave(self):
+        """Toggles the auto-save timer based on user action."""
+        enabled = False
+        if hasattr(self, 'menu_manager') and "autosave" in self.menu_manager.actions:
+            autosave_act = self.menu_manager.actions.get("autosave")
+            enabled = autosave_act.isChecked()
+            
+        if self.session_manager:
+            self.session_manager.set_autosave_enabled(enabled)
+            
+        status = "Enabled" if enabled else "Disabled"
+        self.statusBar().showMessage(f"Auto-Save {status}", 2000)
 
     def setup_window(self):
         self.resize(1280, 800)
@@ -118,6 +130,8 @@ class MainWindow(QMainWindow):
                             QMainWindow.DockOption.AnimatedDocks | 
                             QMainWindow.DockOption.GroupedDragging)
 
+        # Prefer Horizontal splitting for Note/Browser areas
+        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
         
         self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
         self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
@@ -135,8 +149,44 @@ class MainWindow(QMainWindow):
         self.setup_toolbar()
         self.setup_menu()
         
-        # 3. Apply Theme
-        self.apply_theme("dark")
+        # 3. Sidebar (Note Explorer)
+        self.note_service.load_notes() # Ensure data is loaded
+        
+        self.sidebar = SidebarWidget(self.note_service, self)
+        self.sidebar_dock = QDockWidget("Note Explorer", self)
+        self.sidebar_dock.setObjectName("SidebarDock")
+        self.sidebar_dock.setWidget(self.sidebar)
+        
+        # Lock Sidebar: Only Closable (No Floating, No Moving)
+        self.sidebar_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.sidebar_dock.setFixedWidth(280) # Fixed narrow width
+        
+        self.sidebar_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.sidebar_dock)
+        
+        # Connect Sidebar signals
+        self.sidebar.note_selected.connect(self.on_sidebar_note_selected)
+        self.sidebar.note_renamed.connect(self.on_note_renamed)
+        self.sidebar.note_deleted.connect(self.on_note_deleted)
+        
+        # 4. Apply Theme
+        self.theme_manager.apply_theme()
+        
+        # 5. Global Shortcuts
+        search_act = QAction("Global Search", self)
+        search_act.setShortcut("Ctrl+Shift+F")
+        search_act.triggered.connect(self.focus_sidebar_search)
+        self.addAction(search_act)
+
+    def focus_sidebar_search(self):
+        """Toggles the sidebar search bar."""
+        if hasattr(self, 'sidebar_dock') and hasattr(self, 'sidebar'):
+            if not self.sidebar_dock.isVisible():
+                self.sidebar_dock.show()
+            
+            # self.sidebar is the widget.
+            if hasattr(self.sidebar, 'toggle_search'):
+                self.sidebar.toggle_search()
 
     def setup_actions(self):
         self.menu_manager.setup_actions()
@@ -170,174 +220,51 @@ class MainWindow(QMainWindow):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.toggle_visibility()
 
-    def toggle_visibility(self):
-        if self.isVisible():
-            self.hide()
-        else:
-            self.show()
-            self.activateWindow()
-            self.raise_()
-
     def quit_app(self):
         self.save_app_state()
         QApplication.quit()
 
-    def apply_theme(self, mode):
-        self.current_theme = mode
-        if hasattr(self, 'branding'):
-            self.branding.update()
-            
-        # Get path for close icon to use in CSS
-        folder = "dark_theme" if mode == "dark" else "light_theme"
-        close_icon_url = os.path.join(self.base_path, "assets", "icons", folder, "close.svg").replace("\\", "/")
-
-        
-        if mode == "dark":
-            style = f"""
-                QMainWindow, QDockWidget {{ background: #2b2b2b; color: #eeeeee; }}
-                QTextEdit, NotePane {{ background: #333333; color: #eeeeee; border: none; font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 6px; }}
-                QToolBar {{ background: #1e1e1e; border-bottom: 1px solid #333; spacing: 4px; padding: 2px; min-height: 26px; }}
-                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #eeeeee; }}
-                QToolButton:hover {{ background: #3a3a3a; }}
-                QMenuBar {{ background: #1e1e1e; color: #eeeeee; border-bottom: 1px solid #333; padding: 2px; }}
-                QMenuBar::item {{ padding: 4px 8px; }}
-                QMenuBar::item:selected {{ background: #3a3a3a; }}
-                QMenu {{ background: #2b2b2b; color: #eeeeee; padding: 4px; border: 1px solid #444; }}
-                QMenu::item:selected {{ background: #3c3c3c; }}
-                QStatusBar {{ background: #2b2b2b; color: #eeeeee; border-top: 1px solid #444; min-height: 18px; }}
-                QStatusBar QLabel {{ color: #eeeeee; font-size: 11px; padding: 0px 4px; }}
+    def toggle_sidebar(self):
+        logging.info("Toggling Sidebar...")
+        if hasattr(self, 'sidebar_dock'):
+            if self.sidebar_dock.isVisible():
+                logging.info("Sidebar is visible. Closing.")
+                self.sidebar_dock.close()
+            else:
+                logging.info("Sidebar is hidden. Showing.")
+                self.sidebar_dock.show()
+                self.sidebar_dock.raise_()
+                if self.sidebar_dock.isFloating():
+                     self.sidebar_dock.setFloating(False)
                 
-                QTabBar {{
-                    background: #1e1e1e;
-                    border-bottom: 1px solid #333;
-                }}
-                QTabBar::tab {{
-                    background: #252525;
-                    color: #888888;
-                    padding: 2px 16px 2px 8px; /* Hyper-compact */
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                    margin-right: 1px;
-                    min-width: 50px;
-                    font-size: 11px;
-                    border: 1px solid transparent;
-                }}
-                QTabBar::tab:selected {{
-                    background: #333333;
-                    color: #eeeeee;
-                    border-bottom: 2px solid #3498db;
-                }}
-                QTabBar::tab:hover {{
-                    background: #2a2a2a;
-                    color: #cccccc;
-                }}
+                # Force ensure logic (in case of 0 size)
+                # Ensure it's in the layout
+                # self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.sidebar_dock)
                 
-                QTabBar::close-button {{
-                    image: url("{close_icon_url}");
-                    subcontrol-position: right;
-                    margin-right: 2px;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 6px;
-                    background: transparent;
-                }}
-                QTabBar::close-button:hover {{
-                    background-color: #ff5f56;
-                }}
-            """
+                # Check width
+                if self.sidebar_dock.width() < 50:
+                    self.sidebar_dock.resize(250, self.sidebar_dock.height())
         else:
-            style = f"""
-                QMainWindow, QDockWidget {{ background: #ffffff; color: #333333; }}
-                QTextEdit, NotePane {{ background: #ffffff; color: #333333; border: none; font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 6px; }}
-                QToolBar {{ background: #f3f4f6; border-bottom: 1px solid #e5e7eb; spacing: 4px; padding: 2px; min-height: 26px; }}
-                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #333333; }}
-                QToolButton:hover {{ background: #e5e7eb; }}
-                QMenuBar {{ background: #f3f4f6; color: #333333; border-bottom: 1px solid #e5e7eb; padding: 2px; }}
-                QMenuBar::item {{ padding: 4px 8px; }}
-                QMenuBar::item:selected {{ background: #e5e7eb; }}
-                QMenu {{ background: #ffffff; color: #333333; padding: 4px; border: 1px solid #e5e7eb; }}
-                QMenu::item:selected {{ background: #f3f4f6; }}
-                QStatusBar {{ background: #ffffff; color: #333333; border-top: 1px solid #e5e7eb; min-height: 18px; }}
-                QStatusBar QLabel {{ color: #333333; font-size: 11px; padding: 0px 4px; }}
-                
-                QTabBar {{
-                    background: #f3f4f6;
-                    border-bottom: 1px solid #e5e7eb;
-                }}
-                QTabBar::tab {{
-                    background: #e5e7eb;
-                    color: #666666;
-                    padding: 2px 16px 2px 8px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                    margin-right: 1px;
-                    min-width: 50px;
-                    font-size: 11px;
-                    border: 1px solid transparent;
-                }}
-                QTabBar::tab:selected {{
-                    background: #ffffff;
-                    color: #333333;
-                    border-bottom: 2px solid #3498db;
-                }}
-                QTabBar::tab:hover {{
-                    background: #ececec;
-                    color: #333333;
-                }}
-                
-                QTabBar::close-button {{
-                    image: url("{close_icon_url}");
-                    subcontrol-position: right;
-                    margin-right: 2px;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 6px;
-                    background: transparent;
-                }}
-                QTabBar::close-button:hover {{
-                    background-color: #ff5f56;
-                }}
-            """
-        self.setStyleSheet(style)
-        self.update_icons()
+            logging.error("Sidebar dock not found!")
 
-
-
-    def update_icons(self):
-        self.menu_manager.update_icons()
-        
-        if hasattr(self, 'label_ghost'):
-            self.label_ghost.setPixmap(self._get_icon("ghost.svg").pixmap(16, 16))
-
-    def _get_icon(self, filename):
-        folder = "dark_theme" if self.current_theme == "dark" else "light_theme"
-        path = os.path.join(self.base_path, "assets", "icons", folder, filename)
-        return QIcon(path) if os.path.exists(path) else QIcon()
-
+    # Branding and Visibility Management
     def update_branding_visibility(self):
         """Show branding only when no docks are visible."""
         # Clean list and check for visible docks
         visible_docks = []
-        valid_docks = []
         
-        for dock in self.dock_widgets:
+        for dock in self.findChildren(QDockWidget):
             try:
-                # Only count if it's not floating and is visible
-                if dock.isVisible() and not dock.isFloating():
-                    visible_docks.append(dock)
-                elif dock.isFloating() and dock.isVisible():
-                    # Floating docks shouldn't necessarily hide the branding? 
-                    # Actually they should probably count as "using the app".
-                    visible_docks.append(dock)
+                # Skip Sidebar and check visibility
+                if dock.objectName() == "SidebarDock":
+                    continue
                     
-                valid_docks.append(dock)
+                if dock.isVisible():
+                    visible_docks.append(dock)
             except RuntimeError:
-                # C++ object deleted
                 pass
-                
-        self.dock_widgets = valid_docks
         
-        logging.info(f"Branding Check: {len(visible_docks)} visible docks out of {len(valid_docks)} total.")
+        logging.debug(f"Branding Check: {len(visible_docks)} visible docks.")
         
         if visible_docks:
             self.branding.hide()
@@ -350,13 +277,39 @@ class MainWindow(QMainWindow):
     def check_docks_closed(self):
         self.update_branding_visibility()
 
+    # --- File Management (Delegated) ---
+
+    def save_file(self):
+        self.dialog_manager.save_file()
+
+    def save_file_as(self):
+        self.dialog_manager.save_file_as()
+
     # --- Dock Management ---
-    def add_note_dock(self, content="", title=None, obj_name=None):
-        dock = self.dock_manager.add_note_dock(content, title, obj_name)
+    def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None):
+        if not obj_name and not self._is_restoring:
+            # New note created by user: Get entity from service first
+            note_data = self.note_service.add_note(title or "New Note", content)
+            obj_name = note_data["obj_name"]
+            title = note_data["title"]
+            content = note_data["content"]
+            
+        dock = self.dock_manager.add_note_dock(content, title, obj_name, anchor_dock=anchor_dock, file_path=file_path)
+        
+        # Realtime Update for Sidebar (Skip during restoration)
+        if not self._is_restoring and hasattr(self, 'sidebar'):
+            self.sidebar.refresh_tree()
+            
         return dock
 
-    def add_browser_dock(self, url=None):
-        dock = self.dock_manager.add_browser_dock(url)
+    def add_browser_dock(self, url=None, anchor_dock=None, obj_name=None):
+        if not url and not self._is_restoring:
+            # New browser session
+            browser_data = self.browser_service.add_browser()
+            url = browser_data["url"]
+            obj_name = browser_data["obj_name"]
+            
+        dock = self.dock_manager.add_browser_dock(url, anchor_dock=anchor_dock, obj_name=obj_name)
         return dock
 
 
@@ -394,429 +347,201 @@ class MainWindow(QMainWindow):
     # --- Persistence ---
     def save_current_work(self):
         """Manual save triggered by user"""
-        self.save_app_state()
+        self.session_manager.save_app_state()
         self.statusBar().showMessage("Saved successfully!", 2000)
 
     def save_app_state(self):
-        # Convert QByteArray to Hex string for stable INI storage
-        self.config.set_value("window/geometry", str(self.saveGeometry().toHex(), 'utf-8'))
-        self.config.set_value("window/dock_state_v4", str(self.saveState().toHex(), 'utf-8'))
-        
-        storage = StorageManager()
-        notes_data = []
-        browser_data = []
-        
-        for dock in self.dock_widgets:
-            try:
-                widget = dock.widget()
-                if not widget: continue
-                if isinstance(widget, NotePane):
-                    notes_data.append({"obj_name": dock.objectName(), "title": dock.windowTitle(), "content": widget.toHtml()})
-                elif isinstance(widget, BrowserPane):
-                    browser_data.append({"obj_name": dock.objectName(), "title": dock.windowTitle(), "url": widget.browser.url().toString()})
-            except RuntimeError:
-                continue
-                
-        storage.save_data({"notes": notes_data, "browsers": browser_data})
+        self.session_manager.save_app_state()
 
-    def restore_app_state(self):
-        logging.info("Starting restore_app_state...")
-        storage = StorageManager()
-        data = storage.load_data()
-        
-        # 1. AGGRESSIVE CLEANUP: Find ALL QDockWidgets, not just tracked ones
-        # This fixes the "Ghost Dock" accumulation issue (Note 38, Browser 28, etc.)
-        for dock in self.findChildren(QDockWidget):
-            try:
-                dock.close()
-                dock.setParent(None)
-                dock.deleteLater()
-            except RuntimeError:
-                pass
-        self.dock_widgets.clear()
-        
-        # 2. Fresh install check
-        is_fresh = not data
-        
-        # 3. Restore Notes (Limit to 5 to prevent overflow)
-        notes = data.get("notes", [])
-        if is_fresh:
-            self.add_note_dock()
-        else:
-            for i, item in enumerate(notes):
-                if i >= 5: break # Safety Cap
-                dock = self.add_note_dock(title=item.get("title"), obj_name=item.get("obj_name"))
-                if dock and dock.widget():
-                    try:
-                        dock.widget().setHtml(item.get("content", ""))
-                    except RuntimeError:
-                        pass
-        
-        # 4. Restore Browsers (Limit to 5)
-        for i, item in enumerate(data.get("browsers", [])):
-            if i >= 5: break # Safety Cap
-            dock = self.add_browser_dock()
-            if dock and dock.widget():
-                try:
-                    dock.widget().load_url(item.get("url", "https://google.com"))
-                except RuntimeError:
-                    pass
-
-        # GUI State
-        try:
-            geo = self.config.get_value("window/geometry")
-            if geo:
-                if isinstance(geo, str):
-                    self.restoreGeometry(QByteArray.fromHex(geo.encode()))
-                else:
-                    self.restoreGeometry(geo)
-        except Exception as e:
-            logging.error(f"Failed to restore geometry: {e}")
-            
-        try:
-            state = self.config.get_value("window/dock_state_v4")
-            if state:
-                if isinstance(state, str):
-                    self.restoreState(QByteArray.fromHex(state.encode()))
-                else:
-                    self.restoreState(state)
-        except Exception as e:
-            logging.error(f"Failed to restore state: {e}")
-        
-        # Cleanup
-        self.update_branding_visibility()
-        for dock in self.dock_widgets:
-            try:
-                dock.setFloating(False)
-            except RuntimeError:
-                pass
-
-
-    def show_find_dialog(self):
-        if not self.active_pane:
+    @pyqtSlot()
+    def on_content_changed(self):
+        """Triggered when user types or changes content. Restarts debounce timer."""
+        if getattr(self, '_is_restoring', False):
             return
             
-        from PyQt6.QtWidgets import QInputDialog
-        text, ok = QInputDialog.getText(self, "Find in Note", "Search text:")
-        if ok and text:
-            # Find in active pane (QTextEdit)
-            from PyQt6.QtGui import QTextDocument
-            found = self.active_pane.find(text)
-            if not found:
-                # Try from beginning
-                from PyQt6.QtGui import QTextCursor
-                start_cursor = self.active_pane.textCursor()
-                start_cursor.movePosition(QTextCursor.MoveOperation.Start)
-                self.active_pane.setTextCursor(start_cursor)
-                if not self.active_pane.find(text):
-                    self.statusBar().showMessage(f"'{text}' not found.", 2000)
+        autosave_enabled = self.config.get_value("app/autosave_enabled", True)
+        if isinstance(autosave_enabled, str):
+            autosave_enabled = autosave_enabled.lower() == 'true'
+            
+        if autosave_enabled and hasattr(self, 'session_manager'):
+            self.session_manager.start_autosave()
 
-    # --- Utils ---
+        # --- Auto-Update Title from First Line ---
+        # Use sender() to be precise about which pane changed
+        pane = self.sender()
+        from src.features.notes.note_pane import NotePane
+        if not isinstance(pane, NotePane):
+            pane = self.active_pane
+            
+        if isinstance(pane, NotePane):
+             # Find corresponding dock
+             for dock in self.findChildren(QDockWidget):
+                 if dock.widget() == pane:
+                     plain_text = pane.toPlainText().strip()
+                     first_line = plain_text.split('\n')[0] if plain_text else "Untitled"
+                     if len(first_line) > 30: first_line = first_line[:30] + "..."
+                     
+                     if first_line and dock.windowTitle() != first_line:
+                         dock.setWindowTitle(first_line)
+                         if hasattr(self, 'sidebar'):
+                             self.sidebar.refresh_tree()
+                     break
+
+    def on_sidebar_note_selected(self, note_obj_name):
+        """Opens or focuses a note selected from the sidebar."""
+        # Check if already open
+        for dock in self.findChildren(QDockWidget):
+             if dock.objectName() == note_obj_name:
+                 dock.show()
+                 dock.raise_()
+                 dock.setFocus()
+                 return
+        
+        # If not open, restore it from Service
+        logging.info(f"Restoring closed note: {note_obj_name}")
+        note_data = self.note_service.get_note_by_id(note_obj_name)
+        if note_data:
+            self.dock_manager.add_note_dock(note_data.get("content", ""), note_data.get("title", "Untitled"), note_obj_name)
+        else:
+            logging.error(f"Could not find note data for {note_obj_name}")
+            logging.error(f"Could not find note data for {note_obj_name}")
+
+    def _is_dock_deleted(self, dock):
+        try:
+            # Accessing objectName will raise RuntimeError if deleted
+            _ = dock.objectName()
+            return False
+        except RuntimeError:
+            return True
+
+    def on_note_renamed(self, obj_name, new_title):
+        """Updates Dock title when note is renamed via Sidebar."""
+        try:
+            # logging.info(f"on_note_renamed triggered for {obj_name} -> {new_title}")
+            
+            dock = self.findChild(QDockWidget, obj_name)
+            if dock:
+                dock.setWindowTitle(new_title)
+            else:
+                # Robust fallback for when objectName might be slightly different or for child lookups
+                for d in self.findChildren(QDockWidget):
+                    try:
+                        if d.objectName() == obj_name:
+                            d.setWindowTitle(new_title)
+                            return
+                    except RuntimeError:
+                        continue
+                
+                # It's okay if dock isn't open, no need to scream
+                pass
+        except RuntimeError as e:
+            logging.error(f"Error accessing dock: {e}")
+
+    def on_note_deleted(self, obj_name):
+        """Closes Dock when note is deleted via Sidebar."""
+        try:
+            dock = self.findChild(QDockWidget, obj_name)
+            if dock:
+                dock.close()
+            
+            # Robust fallback lookup
+            for d in self.findChildren(QDockWidget):
+                try:
+                    if d.objectName() == obj_name:
+                        d.close()
+                except RuntimeError:
+                    pass
+        except Exception as e:
+            logging.error(f"Error deleting dock: {e}")
+
+    def restore_app_state(self):
+        self.session_manager.restore_app_state()
+
+    # --- Delegated to FindManager ---
+    def show_find_dialog(self):
+        self.find_manager.show()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.find_manager.reposition()
+
+    def eventFilter(self, obj, event):
+        if self.find_manager.handle_key_event(obj, event):
+            return True
+        return super().eventFilter(obj, event)
+
+    # --- Delegated to VisibilityManager ---
 
     def setup_stealth(self):
-        # Initialize Global Stealth Filter
-        from src.core.stealth import StealthEventFilter
-        self.stealth_filter = StealthEventFilter(StealthManager, False)
-        QApplication.instance().installEventFilter(self.stealth_filter)
+        self.visibility_manager.setup_stealth()
 
-        import keyboard
-        def check_hotkey():
-            keyboard.add_hotkey('ctrl+shift+space', lambda: QMetaObject.invokeMethod(self, "toggle_visibility", Qt.ConnectionType.QueuedConnection))
-            keyboard.add_hotkey('ctrl+shift+f9', lambda: QMetaObject.invokeMethod(self, "toggle_ghost_click_external", Qt.ConnectionType.QueuedConnection))
-            keyboard.wait()
-        threading.Thread(target=check_hotkey, daemon=True).start()
-        
-        # Apply initial stealth state after window is shown
-        def initial_stealth():
-            stealth_act = self.menu_manager.actions.get("stealth")
-            if stealth_act:
-                self.toggle_stealth(stealth_act.isChecked())
-        QTimer.singleShot(1000, initial_stealth)
+    @pyqtSlot()
+    def toggle_visibility(self):
+        self.visibility_manager.toggle_visibility()
 
     def toggle_stealth(self, checked):
-        # Update global filter state
-        if hasattr(self, 'stealth_filter'):
-            self.stealth_filter.set_enabled(checked)
-            
-        # Apply to Main Window
-        StealthManager.set_stealth_mode(int(self.winId()), checked)
-        
-        # Apply to all other top-level windows (Floating Docks, Browsers, Tooltips that exist)
-        StealthManager.apply_to_all_windows(QApplication.instance(), checked)
-        
-        self.statusBar().showMessage("Stealth " + ("Enabled" if checked else "Disabled"), 2000)
+        self.visibility_manager.toggle_stealth(checked)
 
     @pyqtSlot()
     def toggle_ghost_click_external(self):
-        # Priority: If Teleprompter is open, toggle IT instead of Main Window
-        if hasattr(self, 'teleprompter') and self.teleprompter and self.teleprompter.isVisible():
-            # Toggle the button state directly to keep UI in sync
-            self.teleprompter.btn_click_through.click()
-            return
-
-        ghost_click_act = self.menu_manager.actions.get("ghost_click")
-        if ghost_click_act:
-            new_state = not ghost_click_act.isChecked()
-            ghost_click_act.setChecked(new_state)
-            self.toggle_ghost_click(new_state)
+        self.visibility_manager.toggle_ghost_click_external()
 
     def toggle_ghost_click(self, checked):
-        if StealthManager.set_click_through(int(self.winId()), checked):
-            self.statusBar().showMessage("Ghost Click " + ("Enabled" if checked else "Disabled"), 2000)
-        else:
-            ghost_click_act = self.menu_manager.actions.get("ghost_click")
-            if ghost_click_act:
-                ghost_click_act.setChecked(not checked)
-
-
+        self.visibility_manager.toggle_ghost_click(checked)
 
     def toggle_always_on_top(self):
-        on_top_act = self.menu_manager.actions.get("always_on_top")
-        on_top = on_top_act.isChecked() if on_top_act else False
-        flags = self.windowFlags()
-        if on_top:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowType.WindowStaysOnTopHint
-            
-        # IMPORTANT: Do not use Qt.WindowType.Tool as it hides the taskbar icon
-        # flags &= ~Qt.WindowType.Tool 
-        
-        self.setWindowFlags(flags)
-        self.show()
-
-    def toggle_autosave(self):
-        """Toggles the auto-save timer based on user action."""
-        # Sync with menu action
-        enabled = False
-        autosave_act = self.menu_manager.actions.get("autosave")
-        if autosave_act:
-            enabled = autosave_act.isChecked()
-            
-        if enabled:
-            if not self.autosave_timer.isActive():
-                self.autosave_timer.start()
-            self.statusBar().showMessage("Auto-Save Enabled", 2000)
-        else:
-            if self.autosave_timer.isActive():
-                self.autosave_timer.stop()
-            self.statusBar().showMessage("Auto-Save Disabled", 2000)
-            
-        # Save preference
-        self.config.set_value("app/autosave_enabled", enabled)
+        self.visibility_manager.toggle_always_on_top()
 
     def change_window_opacity(self, value):
-        self.setWindowOpacity(value / 100.0)
+        self.visibility_manager.change_window_opacity(value)
+
+    # --- Delegated to DialogManager ---
 
     def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Word & Text Files (*.docx *.txt *.md *.py *.js *.html);;All Files (*)")
-        if path:
-            content = UniversalReader.read_file(path)
-            if content:
-                # Content is already HTML-ready from UniversalReader (.docx via mammoth or .txt via internal logic)
-                self.add_note_dock(content=content, title=os.path.basename(path))
+        self.dialog_manager.open_file_dialog()
 
     def show_shortcuts_dialog(self):
-        QMessageBox.information(self, "Shortcuts", "Ctrl+N: Note\nCtrl+Shift+B: Browser\nCtrl+Shift+P: Prompter\nCtrl+Shift+S: Stealth\nCtrl+Shift+F9: Ghost Click")
+        self.dialog_manager.show_shortcuts_dialog()
+
+    def show_about_dialog(self):
+        self.dialog_manager.show_about_dialog()
 
     def open_teleprompter(self):
-        content = self.active_pane.toHtml() if self.active_pane else ""
-        self.teleprompter = TeleprompterDialog(content, None)
-        self.teleprompter.show()
+        self.dialog_manager.open_teleprompter()
 
     def check_for_updates(self, manual=True):
-        has_update, latest_version, url, error = check_for_updates()
-        if has_update:
-            QMessageBox.information(self, "Update", f"v{latest_version} available at {url}")
-        elif manual:
-            QMessageBox.information(self, "Update", "Up to date!")
+        self.dialog_manager.check_for_updates(manual)
 
     def rename_active_note(self):
-        """Standard rename method (useful for shortcut)"""
-        if not self.active_pane:
-            return
-            
-        # Find which dock this pane belongs to
-        for dock in self.dock_widgets:
-            if dock.widget() == self.active_pane:
-                self._show_rename_dialog(dock)
-                break
+        self.dialog_manager.rename_active_note()
 
     def _show_rename_dialog(self, dock):
-        from PyQt6.QtWidgets import QInputDialog
-        new_name, ok = QInputDialog.getText(self, "Rename Note", "New name:", text=dock.windowTitle())
-        if ok and new_name.strip():
-            dock.setWindowTitle(new_name.strip())
-            self.save_app_state()
+        self.dialog_manager.show_rename_dialog(dock)
+
+    # --- Delegated to TabManager ---
 
     def hook_tab_bars(self):
-        """Finds all QTabBars in the window and connects to their signals."""
-        from PyQt6.QtWidgets import QTabBar
-        if not hasattr(self, '_hooked_tabbars'):
-            self._hooked_tabbars = set()
-            
-        for tab_bar in self.findChildren(QTabBar):
-            # Force tooltips to be the full tab text (for truncated tabs)
-            for i in range(tab_bar.count()):
-                text = tab_bar.tabText(i)
-                if tab_bar.tabToolTip(i) != text:
-                    tab_bar.setTabToolTip(i, text)
+        self.tab_manager.hook_tab_bars()
 
-            if tab_bar not in self._hooked_tabbars:
-                tab_bar.tabBarDoubleClicked.connect(lambda idx, tb=tab_bar: self.on_tab_double_clicked(tb, idx))
-                tab_bar.currentChanged.connect(lambda idx, tb=tab_bar: self.on_tab_changed(tb, idx))
-                
-                # Tab Closing Support
-                tab_bar.setTabsClosable(True)
-                tab_bar.tabCloseRequested.connect(lambda idx, tb=tab_bar: self.on_tab_close_requested(tb, idx))
-                
-                # Context Menu Support for Deletion
-                tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-                tab_bar.customContextMenuRequested.connect(lambda pos, tb=tab_bar: self.on_tab_context_menu(tb, pos))
-                
-                self._hooked_tabbars.add(tab_bar)
+    def close_active_tab(self):
+        self.tab_manager.close_active_tab()
 
-    def on_tab_close_requested(self, tab_bar, index):
-        """Called when the (x) button on a tab is clicked."""
-        self.close_dock_at_tab_index(tab_bar, index)
+    def reopen_last_closed_tab(self):
+        self.tab_manager.reopen_last_closed_tab()
 
-    def on_tab_context_menu(self, tab_bar, pos):
-
-        """Shows right-click menu for tabs."""
-        index = tab_bar.tabAt(pos)
-        if index < 0:
-            return
-            
-        menu = QMenu(self)
-        rename_act = QAction("Rename Note", self)
-        rename_act.triggered.connect(lambda: self.on_tab_double_clicked(tab_bar, index))
-        
-        close_act = QAction("Close Note", self)
-        close_act.triggered.connect(lambda: self.close_dock_at_tab_index(tab_bar, index))
-        
-        menu.addAction(rename_act)
-        menu.addSeparator()
-        menu.addAction(close_act)
-        menu.exec(tab_bar.mapToGlobal(pos))
-
-
-
-    def close_dock_at_tab_index(self, tab_bar, index):
-        """Helper to find and remove a dock widget by its tab index."""
-        title = tab_bar.tabText(index)
-        dock_to_close = None
-        
-        # Find dock first safely
-        for dock in self.dock_widgets:
-            try:
-                if dock.windowTitle() == title and not dock.isFloating():
-                    dock_to_close = dock
-                    break
-            except RuntimeError:
-                continue
-                
-        if dock_to_close:
-            dock = dock_to_close
-            # Cleanup active pane reference if this dock is being closed
-            try:
-                if dock.widget() == self.active_pane:
-                    self.set_active_pane(None)
-            except RuntimeError:
-                self.set_active_pane(None)
-                
-            # Remove dock
-            try:
-                dock.close()
-                dock.deleteLater()
-            except RuntimeError:
-                pass
-                
-            if dock in self.dock_widgets:
-                self.dock_widgets.remove(dock)
-            
-            self.save_app_state()
-            self.update_branding_visibility()
-
-    def on_tab_changed(self, tab_bar, index):
-
-        """Called when a tab is selected."""
-        title = tab_bar.tabText(index)
-        for dock in self.dock_widgets:
-            if dock.windowTitle() == title and not dock.isFloating():
-                widget = dock.widget()
-                if isinstance(widget, NotePane):
-                    self.set_active_pane(widget)
-                else:
-                    self.set_active_pane(None)
-                break
-
-    def on_tab_double_clicked(self, tab_bar, index):
-        """Called when a tab is double-clicked."""
-        title = tab_bar.tabText(index)
-        for dock in self.dock_widgets:
-            if dock.windowTitle() == title and not dock.isFloating():
-                self._show_rename_dialog(dock)
-                return
-
+    # --- Delegated to StatusBarManager ---
 
     def setup_status_bar_widgets(self):
-        """Initializes the labels in the status bar."""
-        from PyQt6.QtWidgets import QLabel
-        
-        # Create labels
-        self.status_pos_label = QLabel("Ln 1, Col 1")
-        self.status_char_label = QLabel("0 characters")
-        self.status_zoom_label = QLabel("100%")
-        self.status_eol_label = QLabel("Windows (CRLF)")
-        self.status_enc_label = QLabel("UTF-8")
-        
-        # Add to status bar (permanent right side)
-        sb = self.statusBar()
-        sb.addPermanentWidget(self.status_pos_label)
-        sb.addPermanentWidget(QLabel("  |  ")) # Separator
-        sb.addPermanentWidget(self.status_char_label)
-        sb.addPermanentWidget(QLabel("  |  "))
-        sb.addPermanentWidget(self.status_zoom_label)
-        sb.addPermanentWidget(QLabel("  |  "))
-        sb.addPermanentWidget(self.status_eol_label)
-        sb.addPermanentWidget(QLabel("  |  "))
-        sb.addPermanentWidget(self.status_enc_label)
-        sb.addPermanentWidget(QLabel("   ")) # Padding
+        self.status_bar_manager.setup_widgets()
+        # Create convenience references for backward compatibility
+        self.status_pos_label = self.status_bar_manager.status_pos_label
+        self.status_char_label = self.status_bar_manager.status_char_label
+        self.status_zoom_label = self.status_bar_manager.status_zoom_label
+        self.status_eol_label = self.status_bar_manager.status_eol_label
+        self.status_enc_label = self.status_bar_manager.status_enc_label
 
     def update_status_bar_info(self):
-        """Updates the status bar labels based on the active pane's content and cursor."""
-        if not self.active_pane:
-            self.status_pos_label.setText("")
-            self.status_char_label.setText("")
-            return
-            
-        try:
-            # Check if C++ object is still valid
-            if not self.active_pane.isVisible():
-                 pass # Fall through to try block, but sometimes isVisible fails too
-
-            # Get line/col
-            cursor = self.active_pane.textCursor()
-            line = cursor.blockNumber() + 1
-            col = cursor.columnNumber() + 1
-            self.status_pos_label.setText(f"Ln {line}, Col {col}")
-            
-            # Count chars
-            text = self.active_pane.toPlainText()
-            self.status_char_label.setText(f"{len(text)} characters")
-            
-            # Zoom
-            # self.status_zoom_label.setText(f"{self.active_pane.font().pointSize()}pt")
-            
-        except RuntimeError:
-            # Widget deleted
-            self.active_pane = None
-            self.status_pos_label.setText("")
-            self.status_char_label.setText("")
-        
-        # We can hardcode zoom/encoding for now unless we implement zoom/saving logic
-        # self.status_zoom_label.setText("100%")
-        # self.status_enc_label.setText("UTF-8")
+        self.status_bar_manager.update_info()
 
     def closeEvent(self, event):
         self.save_app_state()

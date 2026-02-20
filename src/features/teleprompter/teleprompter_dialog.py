@@ -139,7 +139,7 @@ class TeleprompterDialog(QDialog):
 
         # --- Text Area ---
         self.text_edit = QTextEdit()
-        self.text_edit.setHtml(content)
+        self.set_html_safe(content)
         self.text_edit.setReadOnly(True)
         self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_edit.setStyleSheet(f"""
@@ -203,6 +203,43 @@ class TeleprompterDialog(QDialog):
         bg_layout.addWidget(self.controls_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
         
         layout.addWidget(self.bg_frame)
+
+    def set_html_safe(self, html):
+        """Robustly sets HTML by extracting base64 images (Unified Logic)."""
+        import re
+        import base64
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtCore import QUrl
+        
+        pattern = r'src=["\']data:image/(?P<ext>[^;]+);base64,(?P<data>[^"\']+)["\']'
+        index = 0
+        doc = self.text_edit.document()
+        
+        # Strip conflicting attributes that might have leaked or were hardcoded
+        html = re.sub(r'(<img[^>]+)style=["\'][^"\']*["\']', r'\1', html)
+        html = re.sub(r'(<img[^>]+)width=["\'][^"\']*["\']', r'\1', html)
+        html = re.sub(r'(<img[^>]+)height=["\'][^"\']*["\']', r'\1', html)
+        
+        # Responsive Image CSS (Ensure it's added LAST)
+        html = html.replace("<img ", "<img style='max-width: 100%;' ")
+
+        def replace_match(match):
+            nonlocal index
+            ext = match.group('ext')
+            data_b64 = match.group('data')
+            try:
+                img_data = base64.b64decode(data_b64)
+                image = QImage.fromData(img_data)
+                if not image.isNull():
+                    res_name = f"pro_img_{index}.{ext}"
+                    doc.addResource(3, QUrl(res_name), image)
+                    index += 1
+                    return f'src="{res_name}"'
+            except: pass
+            return match.group(0)
+
+        processed_html = re.sub(pattern, replace_match, html)
+        self.text_edit.setHtml(processed_html)
 
     def resizeEvent(self, event):
         # Center toast

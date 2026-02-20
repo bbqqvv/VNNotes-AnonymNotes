@@ -6,8 +6,8 @@ class ConfigManager:
     Manages application configuration using QSettings (INI format).
     """
     
-    def __init__(self, app_name="StealthAssist"):
-        self.settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "VTechStudio", app_name)
+    def __init__(self, app_name="VNNotes"):
+        self.settings = QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope, "vtechdigitalsolution", app_name)
     
     def get_value(self, key, default=None):
         return self.settings.value(key, default)

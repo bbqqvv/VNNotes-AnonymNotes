@@ -14,11 +14,26 @@ export default function Changelog() {
                 </div>
 
                 <div className="space-y-12">
+                    {/* Version 1.1.0 */}
+                    <ChangelogEntry
+                        version="v1.1.0"
+                        date="February 20, 2026"
+                        isLatest={true}
+                    >
+                        <ul className="list-disc list-inside space-y-3 text-neutral-300">
+                            <li><strong className="text-white">Stability Fix:</strong> Resolved application crash on launch caused by missing QtWebEngine dependencies.</li>
+                            <li><strong className="text-white">Size Optimization:</strong> Intelligent pruning of unused Qt modules for a leaner install footprint.</li>
+                            <li><strong className="text-white">Auto-Update Check:</strong> Application now checks GitHub for new releases on startup.</li>
+                            <li><strong className="text-white">Branding Polish:</strong> VTech icon now displayed correctly in the Windows taskbar and Start Menu.</li>
+                            <li><strong className="text-white">Clean Install Experience:</strong> Resources folder is now hidden after installation for a professional directory layout.</li>
+                        </ul>
+                    </ChangelogEntry>
+
                     {/* Version 1.0.0 */}
                     <ChangelogEntry
                         version="v1.0.0"
                         date="February 13, 2026"
-                        isLatest={true}
+                        isLatest={false}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
                             <li><strong className="text-white">Phantom Invisibility:</strong> Advanced Anti-Capture technology to bypass Zoom, Teams, and OBS.</li>

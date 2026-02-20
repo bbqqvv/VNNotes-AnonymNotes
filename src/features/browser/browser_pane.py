@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QToolBar, QLineEdit, QMenu)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QLineEdit, QMenu, QToolButton)
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -73,6 +73,12 @@ class StealthWebView(QWebEngineView):
             else:
                  search_act.triggered.connect(lambda: self.load(QUrl(f"https://www.google.com/search?q={selected_text}")))
 
+        # --- Remove "View Page Source" ---
+        from PyQt6.QtWebEngineCore import QWebEnginePage
+        view_source_act = self.page().action(QWebEnginePage.WebAction.ViewSource)
+        if view_source_act in menu.actions():
+            menu.removeAction(view_source_act)
+
         # Layout: [Ask AI] [Search] [Translate]
         if first_action:
             menu.insertAction(first_action, translate_act)
@@ -82,16 +88,7 @@ class StealthWebView(QWebEngineView):
             menu.addAction(ai_act)
             menu.addAction(search_act)
             menu.addAction(translate_act)
-                 
-        if first_action:
-            # We want Search then Translate.
-            # Currently menu is [FirstAction, ...]
-            # We inserted Translate: [Translate, FirstAction, ...]
-            # Now insert Search before Translate: [Search, Translate, FirstAction, ...]
-            menu.insertAction(translate_act, search_act)
-        else:
-            menu.addAction(search_act)
-            
+                  
         # Separator after custom actions
         if first_action:
             menu.insertSeparator(first_action)
@@ -116,32 +113,43 @@ class BrowserPane(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Toolbar
-        self.toolbar = QToolBar()
-        self.toolbar.setStyleSheet("QToolBar { background: #222; border-bottom: 1px solid #444; spacing: 5px; }")
-        layout.addWidget(self.toolbar)
+        # Toolbar Container (QWidget instead of QToolBar to prevent floating issues)
+        self.toolbar_container = QWidget()
+        self.toolbar_container.setObjectName("BrowserToolbar")
+        self.toolbar_container.setFixedHeight(36)
+        self.toolbar_container.setStyleSheet("#BrowserToolbar { background: #222; border-bottom: 1px solid #444; }")
+        self.toolbar_layout = QHBoxLayout(self.toolbar_container)
+        self.toolbar_layout.setContentsMargins(5, 2, 5, 2)
+        self.toolbar_layout.setSpacing(5)
+        layout.addWidget(self.toolbar_container)
 
-
-        
         # Web View
         self.browser = StealthWebView()
-        # Default to Google
         self.browser.setUrl(QUrl("https://www.google.com"))
         self.browser.urlChanged.connect(self.update_url_bar)
         self.browser.titleChanged.connect(self.title_changed.emit)
         
-        # Actions
-        back_act = QAction("<", self)
-        back_act.triggered.connect(self.browser.back)
-        self.toolbar.addAction(back_act)
+        # Helper to create buttons
+        from PyQt6.QtWidgets import QToolButton
+        def create_btn(text, slot):
+            btn = QToolButton()
+            btn.setText(text)
+            btn.clicked.connect(slot)
+            btn.setStyleSheet("""
+                QToolButton { background: transparent; color: #eee; border-radius: 4px; padding: 4px; min-width: 24px; }
+                QToolButton:hover { background: #3a3a3a; }
+            """)
+            return btn
         
-        fwd_act = QAction(">", self)
-        fwd_act.triggered.connect(self.browser.forward)
-        self.toolbar.addAction(fwd_act)
+        # Actions -> Buttons
+        self.btn_back = create_btn("<", self.browser.back)
+        self.toolbar_layout.addWidget(self.btn_back)
         
-        reload_act = QAction("R", self)
-        reload_act.triggered.connect(self.browser.reload)
-        self.toolbar.addAction(reload_act)
+        self.btn_fwd = create_btn(">", self.browser.forward)
+        self.toolbar_layout.addWidget(self.btn_fwd)
+        
+        self.btn_reload = create_btn("R", self.browser.reload)
+        self.toolbar_layout.addWidget(self.btn_reload)
         
         # URL Bar
         self.url_bar = QLineEdit()
@@ -156,7 +164,7 @@ class BrowserPane(QWidget):
             }
         """)
         self.url_bar.returnPressed.connect(self.navigate_to_url)
-        self.toolbar.addWidget(self.url_bar)
+        self.toolbar_layout.addWidget(self.url_bar, 1) # Stretch factor 1 to fill width
         
         layout.addWidget(self.browser)
 

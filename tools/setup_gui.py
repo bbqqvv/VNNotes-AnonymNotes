@@ -1,6 +1,4 @@
-import os
-import sys
-import zipfile
+import py7zr
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -8,6 +6,10 @@ import shutil
 import winshell
 from win32com.client import Dispatch
 from PIL import Image, ImageTk
+import os
+import sys
+import ctypes
+from win32com.propsys import propsys, pscon
 
 class InstallerApp(tk.Tk):
     def __init__(self):
@@ -19,7 +21,7 @@ class InstallerApp(tk.Tk):
         
         # Paths
         self.install_dir = os.path.join(os.environ['LOCALAPPDATA'], "VNNotes")
-        self.zip_path = self.resource_path("data.zip")
+        self.zip_path = self.resource_path("data.7z")
         self.logo_path = self.resource_path("appnote.png")
         self.license_text = """MIT License
 
@@ -110,7 +112,7 @@ SOFTWARE."""
         f = tk.Frame(self.container, bg="#f8f9fa")
         ttk.Label(f, text="Welcome to VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         
-        desc = "VNNotes is the ultimate stealth partner for high-stakes Meetings and Interviews. This setup wizard will guide you through the official installation process of VNNotes v1.0.0 Stable.\n\nKey Power Features:\n• Phantom Invisibility (Anti-Capture Tech)\n• Meeting Master Teleprompting\n• Multi-Document Workspace System\n• Integrated Ultra-Hub (Browser & Clipboard)\n• 100% Standalone Private Vault"
+        desc = "VNNotes is the ultimate stealth partner for high-stakes Meetings and Interviews. This setup wizard will guide you through the official installation process of VNNotes v1.1.0 Stable.\n\nKey Power Features:\n• Phantom Invisibility (Anti-Capture Tech)\n• Meeting Master Teleprompting\n• Multi-Document Workspace System\n• Integrated Ultra-Hub (Browser & Clipboard)\n• 100% Standalone Private Vault"
         tk.Label(f, text=desc, bg="#f8f9fa", wraplength=400, justify="left", font=("Segoe UI", 10)).pack(anchor="w")
         
         tk.Label(f, text="\nClick 'Next' to proceed with the installation.", bg="#f8f9fa", font=("Segoe UI", 10, "italic")).pack(anchor="w")
@@ -219,6 +221,11 @@ SOFTWARE."""
     def browse_folder(self):
         d = filedialog.askdirectory(initialdir=self.install_dir)
         if d:
+            # Auto-append /VNNotes if not present
+            d = os.path.normpath(d)
+            if not d.endswith("VNNotes"):
+                d = os.path.join(d, "VNNotes")
+                
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, d)
 
@@ -236,16 +243,28 @@ SOFTWARE."""
             
             os.makedirs(self.install_dir, exist_ok=True)
             
-            with zipfile.ZipFile(self.zip_path, 'r') as zf:
-                files = zf.namelist()
-                total = len(files)
-                for i, file in enumerate(files):
-                    zf.extract(file, self.install_dir)
-                    if i % 20 == 0:
-                        pct = (i / total) * 100
-                        self.progress['value'] = pct
-                        self.status_label.config(text=f"Copying: {os.path.basename(file)}")
-                        self.update_idletasks()
+            # Determine archive path
+            tmp_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
+            archive_path = os.path.join(tmp_dir, "data.7z")
+            
+            if not os.path.exists(archive_path):
+                # Fallback for dev environment
+                archive_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools/data.7z")
+
+            # Extract using py7zr
+            with py7zr.SevenZipFile(archive_path, mode='r') as archive:
+                # py7zr doesn't provide a direct way to get namelist() and iterate with progress
+                # We'll extract all and then update progress to 100%
+                self.status_label.config(text="Extracting files...")
+                self.update_idletasks()
+                archive.extractall(path=self.install_dir)
+            
+            # 4. Hide Resources folder for professionalism
+            res_dir = os.path.join(self.install_dir, "Resources")
+            if os.path.exists(res_dir):
+                # Set Hidden attribute on Windows
+                FILE_ATTRIBUTE_HIDDEN = 0x02
+                ctypes.windll.kernel32.SetFileAttributesW(res_dir, FILE_ATTRIBUTE_HIDDEN)
                         
             self.progress['value'] = 100
             self.status_label.config(text="Installation successful.")
@@ -273,6 +292,21 @@ SOFTWARE."""
                 shortcut.WorkingDirectory = self.install_dir
                 shortcut.IconLocation = exe_path
                 shortcut.Save()
+
+                # Sync AppUserModelID to the shortcut (Required for Taskbar Branding)
+                # This ensures the shortcut is "Linked" to the running process
+                try:
+                    # Re-open shortcut for property sync
+                    ps = propsys.SHGetPropertyStoreFromParsingName(path, None, propsys.GPS_READWRITE)
+                    pk = pscon.PKEY_AppUserModel_ID
+                    # Define the exact same ID as in main.py
+                    MY_APP_ID = 'vtech.vnnotes.stable.v1'
+                    pv = propsys.PROPVARIANTType(MY_APP_ID)
+                    ps.SetValue(pk, pv)
+                    ps.Commit()
+                except Exception as sync_e:
+                    print(f"ID Sync Error: {sync_e}")
+
             except Exception as e:
                 print(f"Shortcut error: {e}")
                 

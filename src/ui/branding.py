@@ -29,13 +29,20 @@ class BrandingOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
+        is_dark = self._is_dark_mode()
+        
+        # Theme-aware Opacity & Colors
+        logo_opacity = 0.25 if is_dark else 0.45
+        text_opacity = 0.45 if is_dark else 0.65
+        text_color = QColor("#ffffff") if is_dark else QColor("#1f2937")
+        
         # Dimensions
         w = self.width()
         h = self.height()
         
         # 1. Draw Subtle Background Logo
         if self.logo_pixmap:
-            # Scale logo to 20% of window height
+            # Scale logo to 30% of window height
             target_h = int(h * 0.3)
             scaled = self.logo_pixmap.scaledToHeight(target_h, Qt.TransformationMode.SmoothTransformation)
             
@@ -44,15 +51,15 @@ class BrandingOverlay(QWidget):
             y = (h - scaled.height()) // 2
             
             # Set Opacity for "Watermark" feel
-            painter.setOpacity(0.15) # Increased from 0.05
+            painter.setOpacity(logo_opacity)
             painter.drawPixmap(x, y, scaled)
             
-        # 2. Draw Text "Stealth Assist"
-        painter.setOpacity(0.3) # Increased from 0.1
+        # 2. Draw Text "VNNOTES"
+        painter.setOpacity(text_opacity)
         font = QFont("Segoe UI", 24, QFont.Weight.Bold)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
         painter.setFont(font)
-        painter.setPen(QColor("#ffffff") if self._is_dark_mode() else QColor("#000000"))
+        painter.setPen(text_color)
         
         text = "VNNOTES"
         metrics = painter.fontMetrics()
@@ -63,8 +70,11 @@ class BrandingOverlay(QWidget):
         painter.drawText((w - text_w) // 2, text_y, text)
 
     def _is_dark_mode(self):
-        # Infer from parent or default to dark
+        # Look for theme_manager in the main window
         window = self.window()
+        if hasattr(window, "theme_manager"):
+            return window.theme_manager.current_theme == "dark"
+        # Fallback to current_theme property
         if hasattr(window, "current_theme"):
             return window.current_theme == "dark"
         return True

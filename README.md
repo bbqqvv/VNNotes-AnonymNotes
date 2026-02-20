@@ -1,6 +1,6 @@
 # 🍃 VNNotes: The Ultimate Partner for Meetings & Interviews
 
-![Version](https://img.shields.io/badge/version-1.0.0-emerald?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.1.0-emerald?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
@@ -10,7 +10,7 @@
 
 ---
 
-## 🌟 Power Features (v1.0.0 Stable)
+## 🌟 Power Features (v1.1.0 Stable)
 
 ### 1. 👻 Phantom Invisibility (Anti-Capture)
 Share your screen with confidence. Advanced Anti-Capture technology makes VNNotes non-existent to **Zoom, Teams, OBS, and Discord**. Present your secret notes or scripts in plain sight while others only see your wallpaper.
@@ -32,7 +32,7 @@ Zero cloud, zero tracking, zero logs. A military-grade local storage philosophy 
 ## 🚀 Download & Installation
 
 ### Official Installer (Recommended)
-Download the official **v1.0.0 Stable** installer from the Releases page:
+Download the official **v1.1.0 Stable** installer from the Releases page:
 
 👉 **[Download VNNotes Setup](https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest)**
 

@@ -1,6 +1,24 @@
 import sys
 import os
 
+# Disable QtWebEngine logging to prevent debug.log generation
+os.environ["QTWEBENGINE_DISABLE_LOGGING"] = "1"
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-logging --log-level=3 --log-file=NUL"
+
+# Cleanup: Delete debug.log if it exists (Chromium artifact)
+try:
+    if os.path.exists("debug.log"):
+        os.remove("debug.log")
+except:
+    pass
+
+# 3. Windows Icon Fix (AppUserModelID) - MUST BE AT TOP
+if sys.platform == 'win32':
+    import ctypes
+    # Define stable ID used by installer and app
+    MY_APP_ID = 'vtech.vnnotes.stable.v1'
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(MY_APP_ID)
+
 # Add project root to path to ensure imports work
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -40,25 +58,16 @@ def main():
     from PyQt6.QtCore import Qt
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
-    # 2. Setup Exception Hook
-
-    sys.excepthook = exception_hook
-    
-    # 3. Windows Icon Fix (AppUserModelID)
-    if sys.platform == 'win32':
-        import ctypes
-        myappid = 'vnnotes.v1.enterprise' # New ID for VNNotes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    QApplication.setOrganizationName("vtechdigitalsolution")
+    QApplication.setApplicationName("VNNotes")
     
     app = QApplication(sys.argv)
-    app.setApplicationName("VNNotes")
     
     # Set App Icon (Global)
-    # The 'os' module is already imported at the top of the file, so no need to re-import here.
     if getattr(sys, 'frozen', False):
-         base_path = sys._MEIPASS
+        base_path = sys._MEIPASS
     else:
-         base_path = os.path.dirname(os.path.abspath(__file__))
+        base_path = os.path.dirname(os.path.abspath(__file__))
          
     icon_path = os.path.join(base_path, "logo.png")
     if not os.path.exists(icon_path):
@@ -68,7 +77,7 @@ def main():
         from PyQt6.QtGui import QIcon
         app.setWindowIcon(QIcon(icon_path))
         
-    app.setQuitOnLastWindowClosed(True) # Exit when window closes
+    app.setQuitOnLastWindowClosed(True) 
     
     # Initialize
     window = MainWindow()

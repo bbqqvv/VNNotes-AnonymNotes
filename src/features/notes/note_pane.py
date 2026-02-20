@@ -1,9 +1,11 @@
+import logging
 from PyQt6.QtWidgets import QTextEdit
 from PyQt6.QtGui import QFont, QTextListFormat, QTextCursor, QTextBlockFormat
-from PyQt6.QtCore import pyqtSignal, Qt, QUrl
+from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect
 
 class NotePane(QTextEdit):
     focus_received = pyqtSignal(object) # Signal to notify main window of focus
+    content_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -11,22 +13,43 @@ class NotePane(QTextEdit):
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
         self.setAcceptDrops(True)
+        self._deferred_content = None # Lazy Loading support
+        self.file_path = None # Tracking the physical file on disk
+        
+        self.textChanged.connect(self.content_changed.emit)
 
-    def set_html_safe(self, html):
+    def load_deferred_content(self):
+        """Loads the content only when actually needed (visible)."""
+        if self._deferred_content is not None:
+            logging.debug(f"NotePane: Loading deferred content (len={len(self._deferred_content)})")
+            # Block signals to avoid triggering on_content_changed during initial load
+            self.blockSignals(True)
+            self.set_html_safe(self._deferred_content)
+            self._deferred_content = None
+            self.blockSignals(False)
+            return True
+        return False
+
+    def showEvent(self, event):
+        """Triggered when the widget is shown. Perfect time for lazy loading."""
+        super().showEvent(event)
+        self.load_deferred_content()
+    def _process_html_for_insertion(self, html):
         """
-        Robustly sets HTML by extracting base64 images and adding them as document resources.
-        This fixes issues where QTextEdit fails to render data:image URIs directly.
+        Processes HTML by extracting base64 images and adding them as document resources.
+        Returns the processed HTML string WITHOUT setting it to the document.
         """
         import re
         import base64
         from PyQt6.QtGui import QImage
         from PyQt6.QtCore import QUrl
         
-        # Regex to find data URIs. Mammoth usually produces double-quoted src.
-        # Pattern handles data:image/ext;base64,...
-        # Regex to find data URIs. Support both " and ' and any additional attributes.
+        # Regex to find data URIs
         pattern = r'src=["\']data:image/(?P<ext>[^;]+);base64,(?P<data>[^"\']+)["\']'
         
+        # Use a timestamp-based unique prefix to avoid collisions with Word images
+        import time
+        prefix = int(time.time() * 1000)
         index = 0
         doc = self.document()
         
@@ -36,38 +59,58 @@ class NotePane(QTextEdit):
             data_b64 = match.group('data')
             
             try:
-                # 1. Decode base64
                 img_data = base64.b64decode(data_b64)
                 image = QImage.fromData(img_data)
                 
                 if not image.isNull():
-                    # 2. Add as internal resource (ResourceType 3 = Image)
-                    res_name = f"word_img_{index}.{ext}"
+                    res_name = f"img_{prefix}_{index}.{ext}"
                     doc.addResource(3, QUrl(res_name), image)
                     index += 1
-                    # 3. Return new internal src
                     return f'src="{res_name}"'
-            except Exception as e:
-                print(f"Error processing Word image {index}: {e}")
-                
-            return match.group(0) # Keep original if failed
+            except Exception:
+                pass
+            return match.group(0)
 
-        # Replace and set
         processed_html = re.sub(pattern, replace_match, html)
+        
+        # --- SURGICAL NORMALIZATION ---
+        # Strip style (CSS) which often contains conflicting/broken units (in, pt)
+        # BUT keep width and height attributes if they exist (for persistence)
+        processed_html = re.sub(r'(<img[^>]+)style=["\'][^"\']*["\']', r'\1', processed_html)
+        
+        return processed_html
+
+    def set_html_safe(self, html):
+        """
+        Safely sets the entire document HTML. Used during note loading.
+        Maintains width/height attributes for persistence.
+        """
+        processed_html = self._process_html_for_insertion(html)
+        # Note: We do NOT strip width/height here anymore, 
+        # as they are the source of truth for saved sizes.
         self.setHtml(processed_html)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
+        self.load_deferred_content() # Extra safety: load if user clicks it
         self.focus_received.emit(self)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-             cursor = self.cursorForPosition(event.pos())
-             fmt = cursor.charFormat()
-             if fmt.isImageFormat():
-                 self.resize_image_dialog(cursor)
+             # Use precision spatial sensor
+             img_cursor = self._get_image_at_cursor(self.cursorForPosition(event.pos()), event.pos())
+             if img_cursor:
+                 self.resize_image_dialog(img_cursor)
                  return
         super().mouseDoubleClickEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Provide visual feedback (hand cursor) ONLY when over images."""
+        if self._get_image_at_cursor(self.cursorForPosition(event.pos()), event.pos()):
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -89,50 +132,59 @@ class NotePane(QTextEdit):
         # Create standard menu first
         menu = self.createStandardContextMenu()
         
+        from PyQt6.QtGui import QAction, QIcon
+        import os
+        
+        # Helper to find assets
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        # Determine theme from MainWindow
+        main_window = self.window()
+        theme = "dark"
+        if hasattr(main_window, 'theme_manager'):
+            theme = main_window.theme_manager.current_theme
+        
+        icon_folder = "dark_theme" if theme == "dark" else "light_theme"
+        icon_dir = os.path.join(base_path, "assets", "icons", icon_folder)
+        
+        # Apply SVG icons to standard actions if possible
+        # Standard actions usually don't have icons by default in simple QTextEdit context menu
+        # We can try to map them by text if needed, but the user specifically asked for SVGs everywhere.
+        # Let's add icons to the standard ones we have in our assets.
+        for action in menu.actions():
+            text = action.text().replace("&", "")
+            if "Undo" in text: action.setIcon(QIcon(os.path.join(icon_dir, "theme.svg"))) # Placeholder if none
+            if "Redo" in text: action.setIcon(QIcon(os.path.join(icon_dir, "refresh.svg")))
+            if "Cut" in text: action.setIcon(QIcon(os.path.join(icon_dir, "close.svg"))) # Reuse or specific
+            if "Copy" in text: action.setIcon(QIcon(os.path.join(icon_dir, "clipboard.svg")))
+            if "Paste" in text: action.setIcon(QIcon(os.path.join(icon_dir, "clipboard.svg")))
+            if "Delete" in text: action.setIcon(QIcon(os.path.join(icon_dir, "trash.svg")))
+            if "Select All" in text: action.setIcon(QIcon(os.path.join(icon_dir, "search.svg")))
+
         # --- NEW FEATURES: Search & Translate ---
         cursor = self.textCursor()
         selected_text = cursor.selectedText().strip()
         
         if selected_text:
-            from PyQt6.QtGui import QAction, QIcon
-            import os
-            
-            # Helper to find assets
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            icon_dir = os.path.join(base_path, "assets", "icons", "dark_theme")
-
-            # Find MainWindow to access DockManager
-            main_window = self.window()
             dock_manager = getattr(main_window, 'dock_manager', None)
-            
             display_text = (selected_text[:20] + '..') if len(selected_text) > 20 else selected_text
             
             # Ask AI Action
-            ai_act = QAction(f"✨ Ask AI '{display_text}'", self)
-            ai_icon_path = os.path.join(icon_dir, "ai.svg")
-            if os.path.exists(ai_icon_path):
-                ai_act.setIcon(QIcon(ai_icon_path))
-            
+            ai_act = QAction("Ask AI", self)
+            ai_act.setIcon(QIcon(os.path.join(icon_dir, "ai.svg")))
             if dock_manager:
                 ai_url = f"https://www.perplexity.ai/?q={selected_text}"
                 ai_act.triggered.connect(lambda: dock_manager.add_browser_dock(ai_url))
 
             # Translate Action
-            translate_act = QAction(f"Translate '{display_text}'", self)
-            translate_icon_path = os.path.join(icon_dir, "browser.svg")
-            if os.path.exists(translate_icon_path):
-                translate_act.setIcon(QIcon(translate_icon_path))
-                
+            translate_act = QAction("Translate", self)
+            translate_act.setIcon(QIcon(os.path.join(icon_dir, "browser.svg")))
             if dock_manager:
                 trans_url = f"https://translate.google.com/?sl=auto&tl=vi&text={selected_text}&op=translate"
                 translate_act.triggered.connect(lambda: dock_manager.add_browser_dock(trans_url))
             
             # Search Action
-            search_act = QAction(f"Search '{display_text}'", self)
-            search_icon_path = os.path.join(icon_dir, "search.svg")
-            if os.path.exists(search_icon_path):
-                search_act.setIcon(QIcon(search_icon_path))
-                
+            search_act = QAction("Search", self)
+            search_act.setIcon(QIcon(os.path.join(icon_dir, "search.svg")))
             if dock_manager:
                 search_url = f"https://www.google.com/search?q={selected_text}"
                 search_act.triggered.connect(lambda: dock_manager.add_browser_dock(search_url))
@@ -151,26 +203,33 @@ class NotePane(QTextEdit):
                 menu.addAction(translate_act)
         
         # --- Image Options ---
-        cursor = self.cursorForPosition(event.pos())
-        fmt = cursor.charFormat()
+        # Use precision spatial sensor
+        img_cursor = self._get_image_at_cursor(self.cursorForPosition(event.pos()), event.pos())
         
-        if fmt.isImageFormat():
+        if img_cursor:
+            fmt = img_cursor.charFormat()
             menu.addSeparator()
             
-            align_menu = menu.addMenu("📏 Alignment")
-            align_left = align_menu.addAction("⬅️ Align Left")
+            align_menu = menu.addMenu(QIcon(os.path.join(icon_dir, "theme.svg")), "Alignment")
+            
+            align_left = align_menu.addAction(QIcon(os.path.join(icon_dir, "align-left.svg")), "Align Left")
             align_left.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignLeft))
-            align_center = align_menu.addAction("⏺️ Align Center")
+            
+            align_center = align_menu.addAction(QIcon(os.path.join(icon_dir, "align-center.svg")), "Align Center")
             align_center.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignCenter))
-            align_right = align_menu.addAction("➡️ Align Right")
+            
+            align_right = align_menu.addAction(QIcon(os.path.join(icon_dir, "align-right.svg")), "Align Right")
             align_right.triggered.connect(lambda: self.apply_alignment(Qt.AlignmentFlag.AlignRight))
             
             menu.addSeparator()
-            resize_act = menu.addAction("🖼️ Resize Image...")
+            
+            resize_act = menu.addAction(QIcon(os.path.join(icon_dir, "image.svg")), "Resize Image...")
             resize_act.triggered.connect(lambda: self.resize_image_dialog(cursor))
-            reset_act = menu.addAction("🔄 Reset Size")
+            
+            reset_act = menu.addAction(QIcon(os.path.join(icon_dir, "refresh.svg")), "Reset Size")
             reset_act.triggered.connect(lambda: self.reset_image_size(cursor))
-            save_act = menu.addAction("💾 Save Image As...")
+            
+            save_act = menu.addAction(QIcon(os.path.join(icon_dir, "clipboard.svg")), "Save Image As...")
             save_act.triggered.connect(lambda: self.save_image_as(cursor))
             
         menu.exec(event.globalPos())
@@ -183,66 +242,116 @@ class NotePane(QTextEdit):
         cursor.mergeBlockFormat(block_fmt)
         self.setFocus()
 
+    def _get_image_at_cursor(self, cursor, pos=None):
+        """
+        Robustly identifies and selects the image character at or near the cursor.
+        Returns a QTextCursor with the image selected, or None.
+        Calculates holistic bounding boxes for 100% surface area hit detection.
+        """
+        # Scan current, previous, and next blocks to handle alignment/proximity mapping issues
+        target_block = cursor.block()
+        blocks_to_search = [target_block]
+        if target_block.previous().isValid(): blocks_to_search.append(target_block.previous())
+        if target_block.next().isValid(): blocks_to_search.append(target_block.next())
+
+        for block in blocks_to_search:
+            it = block.begin()
+            while not it.atEnd():
+                fragment = it.fragment()
+                if fragment.isValid() and fragment.charFormat().isImageFormat():
+                    fmt = fragment.charFormat().toImageFormat()
+                    
+                    # 1. Capture the Top-Left using a zero-width cursor at start of fragment
+                    tl_cursor = QTextCursor(self.document())
+                    tl_cursor.setPosition(fragment.position())
+                    top_left_rect = self.cursorRect(tl_cursor)
+                    tl = top_left_rect.topLeft()
+                    
+                    # 2. Get the actual display size
+                    w = fmt.width()
+                    h = fmt.height()
+                    
+                    # 3. Construct a holistic bounding box
+                    image_rect = QRect(tl.x(), tl.y(), int(w), int(h))
+                    
+                    if pos:
+                        # 4. Check if the mouse (viewport coords) is inside this visual rectangle
+                        # Includes 5px padding for easier interaction.
+                        if image_rect.adjusted(-5, -5, 5, 5).contains(pos):
+                            img_cursor = QTextCursor(self.document())
+                            img_cursor.setPosition(fragment.position())
+                            img_cursor.movePosition(QTextCursor.MoveOperation.Right, 
+                                                   QTextCursor.MoveMode.KeepAnchor, 
+                                                   fragment.length())
+                            return img_cursor
+                    else:
+                        img_cursor = QTextCursor(self.document())
+                        img_cursor.setPosition(fragment.position())
+                        img_cursor.movePosition(QTextCursor.MoveOperation.Right, 
+                                               QTextCursor.MoveMode.KeepAnchor, 
+                                               fragment.length())
+                        return img_cursor
+                it += 1
+                 
+        return None
+
     def resize_image_dialog(self, cursor):
+        """Standardizes image resizing with native ratio support."""
         from PyQt6.QtWidgets import QInputDialog
-        target_cursor = None
-        img_fmt = None
         
-        if cursor.charFormat().isImageFormat():
-            target_cursor = QTextCursor(cursor)
-            target_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-            img_fmt = cursor.charFormat().toImageFormat()
-            
-        if not target_cursor:
-            c_right = QTextCursor(cursor)
-            c_right.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
-            if c_right.charFormat().isImageFormat():
-                target_cursor = c_right
-                img_fmt = c_right.charFormat().toImageFormat()
-
-        if not target_cursor or not img_fmt:
+        # 1. Robustly find the image
+        img_cursor = self._get_image_at_cursor(cursor)
+        if not img_cursor:
             return
-
-        current_width = img_fmt.width()
-        name = img_fmt.name()
+            
+        target_fmt = img_cursor.charFormat().toImageFormat()
+        name = target_fmt.name()
+        image_res = self.document().resource(3, QUrl(name))
         
-        image_resource = self.document().resource(3, QUrl(name))
-        native_width = image_resource.width() if image_resource and not image_resource.isNull() else 0
-        native_height = image_resource.height() if image_resource and not image_resource.isNull() else 0
+        # Get native dimensions
+        native_w = image_res.width() if image_res and not image_res.isNull() else 0
+        native_h = image_res.height() if image_res and not image_res.isNull() else 0
         
-        start_width = current_width if current_width > 0 else (native_width if native_width > 0 else 300)
+        current_w = target_fmt.width()
+        if current_w <= 0: current_w = native_w if native_w > 0 else 300
         
-        new_width, ok = QInputDialog.getInt(self, "Resize Image", "Enter new width (px):", int(start_width), 10, 2000, 10)
+        # 2. Prompt for width
+        new_width, ok = QInputDialog.getInt(self, "Resize Image", 
+                                           f"Enter width (Native: {native_w}px):", 
+                                           int(current_w), 10, 3000, 10)
         
-        if ok:
-             new_height = 0
-             if native_width > 0:
-                  new_height = int(new_width * (native_height / native_width))
-             
-             new_fmt = target_cursor.charFormat().toImageFormat()
-             new_fmt.setName(name)
-             new_fmt.setWidth(new_width)
-             if new_height > 0: new_fmt.setHeight(new_height)
-             else: new_fmt.setHeight(0)
-             
-             target_cursor.mergeCharFormat(new_fmt)
+        if ok and new_width > 0:
+            # Maintain aspect ratio if possible
+            new_height = 0
+            if native_w > 0:
+                new_height = int(new_width * (native_h / native_w))
+            
+            # 3. Apply format AUTHORITATIVELY with EXACT selection
+            new_fmt = target_fmt
+            new_fmt.setWidth(new_width)
+            if new_height > 0:
+                new_fmt.setHeight(new_height)
+            
+            # Use the img_cursor found by our sensor (it already has the char selected)
+            img_cursor.setCharFormat(new_fmt)
+            self.setFocus()
 
     def reset_image_size(self, cursor):
-        self.setTextCursor(cursor)
-        selection_cursor = self.textCursor()
-        selection_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
-        if not selection_cursor.charFormat().isImageFormat():
-             selection_cursor = self.textCursor()
-             selection_cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
-        if selection_cursor.charFormat().isImageFormat():
-             fmt = selection_cursor.charFormat().toImageFormat()
+        img_cursor = self._get_image_at_cursor(cursor)
+        if img_cursor:
+             fmt = img_cursor.charFormat().toImageFormat()
              fmt.setWidth(0)
              fmt.setHeight(0)
-             selection_cursor.setCharFormat(fmt)
+             img_cursor.setCharFormat(fmt)
+             self.setFocus()
 
     def save_image_as(self, cursor):
         from PyQt6.QtWidgets import QFileDialog
-        fmt = cursor.charFormat().toImageFormat()
+        img_cursor = self._get_image_at_cursor(cursor)
+        if not img_cursor:
+            return
+            
+        fmt = img_cursor.charFormat().toImageFormat()
         name = fmt.name()
         image = self.document().resource(3, QUrl(name))
         if image and not image.isNull():
@@ -307,9 +416,54 @@ class NotePane(QTextEdit):
                 ba.open(QIODevice.OpenModeFlag.WriteOnly)
                 image.save(ba, "PNG")
                 base64_data = base64.b64encode(ba.data().data()).decode('utf-8')
-                self.set_html_safe(f'<img src="data:image/png;base64,{base64_data}" />')
+                # FIX: Use insertHtml to avoid wiping the document
+                processed_img = self._process_html_for_insertion(f'<img src="data:image/png;base64,{base64_data}" />')
+                self.textCursor().insertHtml(processed_img)
                 return
         super().insertFromMimeData(source)
+
+    def get_content_with_embedded_images(self):
+        """
+        Exports HTML with images embedded as base64 data URIs.
+        This ensures images persist across sessions.
+        """
+        # CRITICAL: Ensure content is loaded from deferred state before we try to take a snapshot
+        self.load_deferred_content()
+        
+        html = self.toHtml()
+        doc = self.document()
+        
+        # Regex to find src="word_img_..." or other internal resources
+        # We need to find the resource name and replace it with data URI
+        import re
+        import base64
+        from PyQt6.QtCore import QBuffer, QIODevice
+        
+        # Helper to convert QImage to Base64
+        def image_to_base64(image):
+            ba = QBuffer()
+            ba.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(ba, "PNG")
+            return base64.b64encode(ba.data().data()).decode('utf-8')
+
+        def replace_src(match):
+            src = match.group(1)
+            # Check if it's an internal resource (img_... or word_img_... or qrc:/)
+            if any(p in src for p in ["img_", "word_img_", "qrc:/"]):
+                 # Resource Type 3 is Image
+                 image = doc.resource(3, QUrl(src))
+                 
+                 if image and not image.isNull():
+                     b64_data = image_to_base64(image)
+                     return f'src="data:image/png;base64,{b64_data}"'
+            
+            return match.group(0) # Keep original if not an internal image
+
+        # Replace src="..."
+        # Pattern matches src="value"
+        pattern = r'src="([^"]+)"'
+        new_html = re.sub(pattern, replace_src, html)
+        return new_html
 
     def insert_image_from_file(self):
         from PyQt6.QtWidgets import QFileDialog
@@ -324,4 +478,6 @@ class NotePane(QTextEdit):
         ba.open(QIODevice.OpenModeFlag.WriteOnly)
         image.save(ba, "PNG")
         base64_data = base64.b64encode(ba.data().data()).decode('utf-8')
-        self.set_html_safe(f'<img src="data:image/png;base64,{base64_data}" />')
+        # FIX: Use insertHtml to avoid wiping the document
+        processed_img = self._process_html_for_insertion(f'<img src="data:image/png;base64,{base64_data}" />')
+        self.textCursor().insertHtml(processed_img)

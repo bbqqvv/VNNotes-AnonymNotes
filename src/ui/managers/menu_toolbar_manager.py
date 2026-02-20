@@ -27,9 +27,18 @@ class MenuToolbarManager:
 
         self.create_action("open", "Open File", "Open File / Word Document (Ctrl+O)", "Ctrl+O",
                           self.main_window.open_file_dialog, icon="folder-open.svg")
+
+        self.create_action("save", "Save", "Save current note (Ctrl+S)", "Ctrl+S", 
+                          self.main_window.save_file, icon="folder-add.svg")
+
+        self.create_action("save_as", "Save As...", "Export note to a different file", "Ctrl+Alt+S",
+                          self.main_window.save_file_as, icon="folder-add.svg")
                           
         self.create_action("clipboard", "Clipboard", "Clipboard History (Ctrl+Shift+V)", "Ctrl+Shift+V",
                           self.main_window.add_clipboard_dock)
+                          
+        self.create_action("sidebar", "Page Bar", "Toggle Sidebar (Ctrl+Shift+E)", "Ctrl+Shift+E",
+                          lambda: self.main_window.toggle_sidebar(), icon="sidebar.svg")
 
         # --- Formatting ---
         self.create_action("bold", "Bold", "Bold (Ctrl+B)", "Ctrl+B",
@@ -61,52 +70,74 @@ class MenuToolbarManager:
         self.create_action("search", "Find", "Find in Note (Ctrl+F)", "Ctrl+F",
                           self.main_window.show_find_dialog)
 
+        self.create_action("close_tab", "Close Tab", "Close Active Tab (Ctrl+W)", "Ctrl+W",
+                          self.main_window.close_active_tab)
+        self.create_action("reopen_tab", "Reopen Closed Tab", "Reopen Last Closed Tab (Ctrl+Shift+T)", "Ctrl+Shift+T",
+                          self.main_window.reopen_last_closed_tab)
+
         # --- Special Actions (Toggleable) ---
         # Ghost Actions
-        self.ghost_act = QAction("Toggle Ghost Mode", self.main_window)
-        self.ghost_act.setCheckable(True)
-        self.ghost_act.setShortcut("Ctrl+Shift+G")
-        self.ghost_act.triggered.connect(lambda checked: self.main_window.change_window_opacity(20 if checked else 100))
-        self.actions["ghost_toggle"] = self.ghost_act
+        ghost_act = QAction("Toggle Ghost Mode", self.main_window)
+        ghost_act.setCheckable(True)
+        ghost_act.setShortcut("Ctrl+Shift+G")
+        ghost_act.triggered.connect(lambda checked: self.main_window.change_window_opacity(20 if checked else 100))
+        self.actions["ghost_toggle"] = ghost_act
 
-        self.ghost_click_act = QAction("Ghost Click (Click-Through)", self.main_window)
-        self.ghost_click_act.setCheckable(True)
-        self.ghost_click_act.setShortcut("Ctrl+Shift+F9")
-        self.ghost_click_act.setToolTip("Makes window transparent to mouse clicks. Use Hotkey to disable!")
-        self.ghost_click_act.triggered.connect(self.main_window.toggle_ghost_click)
-        self.actions["ghost_click"] = self.ghost_click_act
+        ghost_click_act = QAction("Ghost Click (Click-Through)", self.main_window)
+        ghost_click_act.setCheckable(True)
+        ghost_click_act.setShortcut("Ctrl+Shift+F9")
+        ghost_click_act.setToolTip("Makes window transparent to mouse clicks. Use Hotkey to disable!")
+        ghost_click_act.triggered.connect(self.main_window.toggle_ghost_click)
+        self.actions["ghost_click"] = ghost_click_act
         
         # Stealth & Top
-        self.stealth_act = QAction(self._icon("lock.svg"), "Super Stealth (Anti-Capture)", self.main_window)
-        self.stealth_act.setCheckable(True)
-        self.stealth_act.setChecked(True)
-        self.stealth_act.setToolTip("Hides window from Screen Share/Recording (You can still see it)")
-        self.stealth_act.setShortcut("Ctrl+Shift+S")
-        self.stealth_act.triggered.connect(self.main_window.toggle_stealth)
-        self.actions["stealth"] = self.stealth_act
+        stealth_act = QAction(self._icon("lock.svg"), "Super Stealth (Anti-Capture)", self.main_window)
+        stealth_act.setCheckable(True)
+        stealth_act.setChecked(True)
+        stealth_act.setToolTip("Hides window from Screen Share/Recording (You can still see it)")
+        stealth_act.setShortcut("Ctrl+Shift+S")
+        stealth_act.triggered.connect(self.main_window.toggle_stealth)
+        self.actions["stealth"] = stealth_act
         
-        self.top_act = QAction(self._icon("top.svg"), "Always on Top", self.main_window)
-        self.top_act.setCheckable(True)
-        self.top_act.setChecked(True)
-        self.top_act.triggered.connect(self.main_window.toggle_always_on_top)
-        self.actions["always_on_top"] = self.top_act
+        top_act = QAction(self._icon("top.svg"), "Always on Top", self.main_window)
+        top_act.setCheckable(True)
+        top_act.setChecked(True)
+        top_act.triggered.connect(self.main_window.toggle_always_on_top)
+        self.actions["always_on_top"] = top_act
         
         # Help/Misc
-        self.shortcuts_act = QAction("Keyboard Shortcuts", self.main_window)
-        self.shortcuts_act.setShortcut("F1")
-        self.shortcuts_act.triggered.connect(self.main_window.show_shortcuts_dialog)
-        self.actions["shortcuts"] = self.shortcuts_act
+        shortcuts_act = QAction("Keyboard Shortcuts", self.main_window)
+        shortcuts_act.setShortcut("F1")
+        shortcuts_act.triggered.connect(self.main_window.show_shortcuts_dialog)
+        self.actions["shortcuts"] = shortcuts_act
         
-        self.update_act = QAction("Check for Updates", self.main_window)
-        self.update_act.triggered.connect(self.main_window.check_for_updates)
-        self.actions["update"] = self.update_act
+        update_act = QAction("Check for Updates", self.main_window)
+        update_act.triggered.connect(self.main_window.check_for_updates)
+        self.actions["update"] = update_act
+        
+        about_act = QAction("About VNNotes", self.main_window)
+        about_act.triggered.connect(self.main_window.show_about_dialog)
+        self.actions["about"] = about_act
 
         # Auto-Save
-        self.autosave_act = QAction("Auto-Save", self.main_window)
-        self.autosave_act.setCheckable(True)
-        self.autosave_act.setChecked(True) # Default on
-        self.autosave_act.triggered.connect(self.main_window.toggle_autosave)
-        self.actions["autosave"] = self.autosave_act
+        autosave_act = QAction("Auto-Save", self.main_window)
+        autosave_act.setCheckable(True)
+        autosave_act.setChecked(True) # Default on
+        autosave_act.triggered.connect(self.main_window.toggle_autosave)
+        self.actions["autosave"] = autosave_act
+
+        # Theme Actions
+        theme_dark_act = QAction("Dark Mode", self.main_window)
+        theme_dark_act.triggered.connect(lambda: self.main_window.theme_manager.apply_theme("dark"))
+        self.actions["theme_dark"] = theme_dark_act
+
+        theme_light_act = QAction("Light Mode", self.main_window)
+        theme_light_act.triggered.connect(lambda: self.main_window.theme_manager.apply_theme("light"))
+        self.actions["theme_light"] = theme_light_act
+        
+        # General Toggle Action (for shortcut)
+        self.create_action("theme", "Toggle Theme", "Switch between Light and Dark mode", "Ctrl+T", 
+                          self.main_window.theme_manager.toggle_theme, icon="theme.svg")
 
     def create_action(self, key, text, tooltip, shortcut, callback, icon=None):
         icon_name = icon if icon else f"{key}.svg"
@@ -115,6 +146,8 @@ class MenuToolbarManager:
         action.setShortcut(shortcut)
         action.triggered.connect(callback)
         self.actions[key] = action
+        # Register on main window so keyboard shortcuts are globally active
+        self.main_window.addAction(action)
         return action
 
     def setup_toolbar(self):
@@ -128,7 +161,7 @@ class MenuToolbarManager:
         toolbar.addAction(self.actions["note"])
         toolbar.addAction(self.actions["browser"])
         toolbar.addAction(self.actions["prompter"])
-        toolbar.addAction(self.actions["open"])
+        # Removed Open action from toolbar per user request
         toolbar.addAction(self.actions["clipboard"])
         toolbar.addAction(self.actions["image"])
         
@@ -153,19 +186,19 @@ class MenuToolbarManager:
         toolbar.addSeparator()
         
         # Opacity Slider
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(20, 100)
-        self.opacity_slider.setValue(100)
-        self.opacity_slider.setFixedWidth(80)
-        self.opacity_slider.setToolTip("Ghost Mode (Opacity) [Ctrl+Shift+G]")
-        self.opacity_slider.valueChanged.connect(self.main_window.change_window_opacity)
-        toolbar.addWidget(self.opacity_slider)
+        opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        opacity_slider.setRange(20, 100)
+        opacity_slider.setValue(100)
+        opacity_slider.setFixedWidth(80)
+        opacity_slider.setToolTip("Ghost Mode (Opacity) [Ctrl+Shift+G]")
+        opacity_slider.valueChanged.connect(self.main_window.change_window_opacity)
+        toolbar.addWidget(opacity_slider)
         
         # Ghost Label
-        self.label_ghost = QLabel()
-        self.label_ghost.setPixmap(self._icon("ghost.svg").pixmap(16, 16))
-        self.label_ghost.setToolTip("Ghost Mode")
-        toolbar.addWidget(self.label_ghost)
+        label_ghost = QLabel()
+        label_ghost.setPixmap(self._icon("ghost.svg").pixmap(16, 16))
+        label_ghost.setToolTip("Ghost Mode")
+        toolbar.addWidget(label_ghost)
 
     def setup_menu(self):
         menubar = self.main_window.menuBar()
@@ -174,6 +207,11 @@ class MenuToolbarManager:
         # File
         file_menu = menubar.addMenu("File")
         file_menu.addAction(self.actions["open"])
+        file_menu.addAction(self.actions["save"])
+        file_menu.addAction(self.actions["save_as"])
+        file_menu.addSeparator()
+        file_menu.addAction(self.actions["close_tab"])
+        file_menu.addAction(self.actions["reopen_tab"])
         file_menu.addSeparator()
         if "autosave" in self.actions:
             file_menu.addAction(self.actions["autosave"])
@@ -190,11 +228,21 @@ class MenuToolbarManager:
             for action in dock_menu.actions():
                 view_menu.addAction(action)
             view_menu.addSeparator()
+        
+        if "sidebar" in self.actions:
+            view_menu.addAction(self.actions["sidebar"])
             
         view_menu.addAction(self.actions["stealth"])
         view_menu.addAction(self.actions["always_on_top"])
         view_menu.addAction(self.actions["ghost_toggle"])
         view_menu.addAction(self.actions["ghost_click"])
+        
+        view_menu.addSeparator()
+        theme_menu = view_menu.addMenu(self._icon("theme.svg"), "Appearance")
+        theme_menu.addAction(self.actions["theme_dark"])
+        theme_menu.addAction(self.actions["theme_light"])
+        theme_menu.addSeparator()
+        theme_menu.addAction(self.actions["theme"])
         
         # Format
         format_menu = menubar.addMenu("Format")
@@ -220,12 +268,12 @@ class MenuToolbarManager:
         
         # Help
         help_menu = menubar.addMenu("Help")
-        help_menu.addAction(self.actions["shortcuts"])
+        help_menu.addAction(self.actions["about"])
         help_menu.addSeparator()
         help_menu.addAction(self.actions["update"])
         
     def _icon(self, filename):
-        return self.main_window._get_icon(filename)
+        return self.main_window.theme_manager.get_icon(filename)
 
     def update_icons(self):
         # Update all actions
@@ -238,8 +286,6 @@ class MenuToolbarManager:
             if key == "always_on_top": icon_name = "top.svg"
             if key == "ghost_toggle": icon_name = "ghost.svg"
             if key == "ghost_click": icon_name = "ghost.svg" # Reuse same icon or different?
+            if key == "theme": icon_name = "theme.svg"
             
             action.setIcon(self._icon(icon_name))
-            
-        if hasattr(self, 'label_ghost'):
-             self.label_ghost.setPixmap(self._icon("ghost.svg").pixmap(16, 16))

@@ -13,19 +13,11 @@ class ClipboardPane(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         
         self.list_widget = QListWidget()
+        self.list_widget.setObjectName("ClipboardList")
         self.list_widget.setFrameShape(QListWidget.Shape.NoFrame)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self.on_context_menu)
-        self.list_widget.setStyleSheet("""
-            QListWidget { background: transparent; }
-            QListWidget::item { 
-                padding: 8px; 
-                border-bottom: 1px solid #333; 
-                color: #ccc;
-            }
-            QListWidget::item:hover { background: #333; color: #fff; }
-            QListWidget::item:selected { background: #444; color: #fff; }
-        """)
+        # Style now managed by ThemeManager
         self.list_widget.itemClicked.connect(self.on_item_clicked)
         self.layout.addWidget(self.list_widget)
 

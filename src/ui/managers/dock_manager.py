@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import QDockWidget, QMessageBox
 from PyQt6.QtCore import Qt
-from src.features.notes.note_pane import NotePane
-from src.features.browser.browser_pane import BrowserPane
+import uuid
+import logging
 
 class DockManager:
     """
@@ -10,203 +10,179 @@ class DockManager:
     """
     def __init__(self, main_window):
         self.main_window = main_window
-        # We access main_window.dock_widgets list directly or maintain our own?
-        # Maintaining sync is hard, so let's reference the main window's list for now
-        # or better: MainWindow delegates all dock ops to this manager.
 
-    def add_note_dock(self, content="", title=None, obj_name=None):
-        count = len(self.main_window.dock_widgets) + 1
-        name = obj_name if obj_name else f"NoteDock_{count}_{Qt.GlobalColor.black}"
+    def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None):
+        if not obj_name:
+            # Standardize naming to match services (NoteDock_N format ideally)
+            # For now, keep the UUID logic for uniqueness but ensure it's recognizable
+            uid = uuid.uuid4().hex
+            obj_name = f"NoteDock_{uid[:8]}"
         
-        if not title:
-            title = f"Note {count}"
-            
-        dock = QDockWidget(title, self.main_window)
-        dock.setObjectName(name)
-        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
-                         QDockWidget.DockWidgetFeature.DockWidgetClosable |
-                         QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose) # Truly delete on close
+        # Check if dock already exists
+        existing_dock = self.main_window.findChild(QDockWidget, obj_name)
+        if existing_dock:
+            existing_dock.show()
+            existing_dock.raise_()
+            return existing_dock
         
-        note_pane = NotePane()
-        if content:
-            # Use safety method to ensure base64 images from Word/Pasting are loaded as resources
-            note_pane.set_html_safe(content)
-        
-        # Track focus (Delegate back to main window if needed)
-        if hasattr(self.main_window, 'set_active_pane'):
-            note_pane.focus_received.connect(self.main_window.set_active_pane)
-        
-        dock.setWidget(note_pane)
-        
-        
-        # Smart Docking Strategy: Tabify if other VISIBLE notes exist
-        valid_docks = self._get_valid_docks()
-        existing_notes = [d for d in valid_docks 
-                          if isinstance(d.widget(), NotePane) and d != dock and d.isVisible() and not d.isFloating()]
-        
-        if existing_notes:
-            self.main_window.tabifyDockWidget(existing_notes[0], dock)
-        else:
-            self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
-            
-        dock.show()
-        dock.raise_()
-        self._register_dock(dock)
-
-        dock.show()
-        dock.raise_()
-        self._register_dock(dock)
-
-    def _get_valid_docks(self):
-        """Returns a list of valid (non-deleted) dock widgets."""
-        valid = []
-        for d in self.main_window.dock_widgets:
-            try:
-                if not d.widget(): continue # access to check validity
-                valid.append(d)
-            except RuntimeError:
-                pass
-        return valid
-
-    def add_browser_dock(self, url=None):
-        # Filter specifically by object name or class name string to be safe
-        valid_docks = self._get_valid_docks()
-        existing_count = 0
-        for d in valid_docks:
-            if d.objectName().startswith("BrowserDock_"):
-                existing_count += 1
-        count = existing_count + 1
-        
-        dock = QDockWidget(f"Mini Browser {count}", self.main_window)
-        dock.setObjectName(f"BrowserDock_{count}")
+        dock = QDockWidget(title or "Note", self.main_window)
+        dock.setObjectName(obj_name)
         dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
                          QDockWidget.DockWidgetFeature.DockWidgetClosable |
                          QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         
-        browser = BrowserPane(url, self.main_window)
-        browser = BrowserPane(url, self.main_window)
-        dock.setWidget(browser)
+        from src.features.notes.note_pane import NotePane
+        note_pane = NotePane()
+        note_pane.file_path = file_path
+        if content:
+            # Use deferred content for lazy loading only if it's large, 
+            # but for restoration we often want it immediate.
+            note_pane._deferred_content = content
         
-        # Connect title updates
-        browser.title_changed.connect(lambda t: self._update_dock_title(dock, t))
-
+        # Connect signals
+        if hasattr(self.main_window, 'set_active_pane'):
+            note_pane.focus_received.connect(self.main_window.set_active_pane)
+        if hasattr(self.main_window, 'on_content_changed'):
+            note_pane.textChanged.connect(self.main_window.on_content_changed)
         
-        # Check for existing browsers to tabify
-        existing_browsers = [d for d in valid_docks 
-                             if d.objectName().startswith("BrowserDock_") and d != dock and d.isVisible() and not d.isFloating()]
+        dock.setWidget(note_pane)
         
-        if existing_browsers:
-            self.main_window.tabifyDockWidget(existing_browsers[0], dock)
+        # Tabification logic
+        if anchor_dock:
+             self.main_window.tabifyDockWidget(anchor_dock, dock)
         else:
-            # Simplify: Always add to Right Area. 
-            # Since Notes are in Left Area, this effectively creates size-by-side.
-            # This avoids 'splitDockWidget' failures with tabbed/hidden widgets.
-            self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-            
+            main_docks = [d for d in self.main_window.findChildren(QDockWidget) 
+                          if d.objectName() != "SidebarDock" and d != dock]
+            if main_docks:
+                self.main_window.tabifyDockWidget(main_docks[-1], dock)
+            else:
+                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        
         dock.show()
         dock.raise_()
         self._register_dock(dock)
+        return dock
 
+    def add_browser_dock(self, url=None, obj_name=None, anchor_dock=None):
+        if not obj_name:
+            # Standardize naming to match BrowserService logic
+            max_id = 0
+            for d in self.main_window.findChildren(QDockWidget):
+                name = d.objectName()
+                if name.startswith("BrowserDock_"):
+                    try:
+                        bid = int(name.split("_")[1])
+                        if bid > max_id: max_id = bid
+                    except (ValueError, IndexError): pass
+            obj_name = f"BrowserDock_{max_id + 1}"
 
-        
-    def add_clipboard_dock(self, clipboard_manager_instance):
         # Check if exists
-        for dock in self.main_window.dock_widgets:
-             if dock.objectName() == "ClipboardDock":
-                dock.show()
-                dock.raise_()
-                return
+        existing_dock = self.main_window.findChild(QDockWidget, obj_name)
+        if existing_dock:
+            existing_dock.show()
+            existing_dock.raise_()
+            return existing_dock
 
-        dock = QDockWidget("Clipboard History", self.main_window)
-        dock.setObjectName("ClipboardDock")
+        dock = QDockWidget("Mini Browser", self.main_window)
+        dock.setObjectName(obj_name)
         dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
                          QDockWidget.DockWidgetFeature.DockWidgetClosable |
                          QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        
+        from src.features.browser.browser_pane import BrowserPane
+        browser = BrowserPane(url, self.main_window)
+        dock.setWidget(browser)
+        
+        browser.title_changed.connect(lambda t: self._update_dock_title(dock, t))
+
+        # Tabification
+        if anchor_dock:
+             self.main_window.tabifyDockWidget(anchor_dock, dock)
+        else:
+            main_docks = [d for d in self.main_window.findChildren(QDockWidget) 
+                          if d.objectName() != "SidebarDock" and d != dock]
+            if main_docks:
+                self.main_window.tabifyDockWidget(main_docks[-1], dock)
+            else:
+                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            
+        dock.show()
+        dock.raise_()
+        self._register_dock(dock)
+        
+        # Sidebar refresh
+        if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
+            self.main_window.sidebar.refresh_tree()
+        return dock
+
+    def add_clipboard_dock(self, clipboard_manager_instance):
+        existing = self.main_window.findChild(QDockWidget, "ClipboardDock")
+        if existing:
+            existing.show()
+            existing.raise_()
+            return existing
+
+        dock = QDockWidget("Clipboard History", self.main_window)
+        dock.setObjectName("ClipboardDock")
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
         from src.features.clipboard.clipboard_pane import ClipboardPane
         clipboard_pane = ClipboardPane()
         
-        # Connect signals
         clipboard_manager_instance.history_updated.connect(clipboard_pane.update_history)
         if hasattr(self.main_window, 'paste_from_clipboard'):
              clipboard_pane.item_clicked.connect(self.main_window.paste_from_clipboard)
         
-        # Deletion support
         clipboard_pane.item_remove_requested.connect(clipboard_manager_instance.remove_item)
         clipboard_pane.clear_all_requested.connect(clipboard_manager_instance.clear_history)
-        
         clipboard_pane.update_history(clipboard_manager_instance.get_history())
 
         dock.setWidget(clipboard_pane)
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self._register_dock(dock)
+        return dock
 
     def _register_dock(self, dock):
-        self.main_window.dock_widgets.append(dock)
-        self.main_window.dock_widgets.append(dock)
-        # Connect visibility change to branding update
         if hasattr(self.main_window, 'check_docks_closed'):
-            dock.visibilityChanged.connect(lambda: self.main_window.check_docks_closed())
-            self.main_window.update_branding_visibility()
-            
+            dock.visibilityChanged.connect(lambda _: self.main_window.check_docks_closed())
+        
+        # Connection for destroyed to cleanup sidebar
+        dock.destroyed.connect(lambda: self._on_dock_destroyed(dock))
+
     def _update_dock_title(self, dock, title):
-        """Updates dock title and tooltip, ensuring full text is available."""
         if not title: return
         dock.setWindowTitle(title)
-        dock.setToolTip(title) # Set tooltip on the dock itself
-        # Trigger tooltip update on tab bar immediately if possible
-        if hasattr(self.main_window, 'hook_tab_bars'):
-             self.main_window.hook_tab_bars()
-
-            
-        # Handle cleanup when dock is deleted
-        dock.destroyed.connect(lambda: self._on_dock_destroyed(dock))
+        dock.setToolTip(title)
+        
+        if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
+            try:
+                self.main_window.sidebar.refresh_tree()
+            except RuntimeError: pass
 
     def _on_dock_destroyed(self, dock):
         try:
-            # Handle list removal carefully
-            if hasattr(self.main_window, 'dock_widgets') and dock in self.main_window.dock_widgets:
-                self.main_window.dock_widgets.remove(dock)
-            
-            # Check for branding update
-            if getattr(self.main_window, 'check_docks_closed', None):
-                 try:
-                    self.main_window.check_docks_closed()
-                 except RuntimeError:
-                    pass # MainWindow might be deleting
-                    
-        except RuntimeError:
-            pass # Container or items already deleted
+            if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
+                self.main_window.sidebar.refresh_tree()
+            if hasattr(self.main_window, 'check_docks_closed'):
+                self.main_window.check_docks_closed()
+        except RuntimeError: pass
 
     def close_all_notes(self):
-        """Closes all Note docks."""
-        # Create a copy of the list to avoid modification issues while iterating
-        for dock in self.main_window.dock_widgets[:]: 
-            try:
-                if not dock.widget(): continue
-                if isinstance(dock.widget(), NotePane):
-                    dock.close() # Will trigger WA_DeleteOnClose and _on_dock_destroyed
-            except RuntimeError:
-                pass
+        from src.features.notes.note_pane import NotePane
+        for dock in self.main_window.findChildren(QDockWidget):
+            if isinstance(dock.widget(), NotePane):
+                dock.close()
 
     def close_all_browsers(self):
-        """Closes all Browser docks."""
-        for dock in self.main_window.dock_widgets[:]:
-            try:
-                if dock.objectName().startswith("BrowserDock_"):
-                    dock.close()
-            except RuntimeError:
-                pass
+        for dock in self.main_window.findChildren(QDockWidget):
+            if dock.objectName().startswith("BrowserDock_"):
+                dock.close()
 
     def close_all_docks(self):
-        """Closes ALL docks (Notes + Browsers + Clipboard)."""
-        for dock in self.main_window.dock_widgets[:]:
-            try:
+        for dock in self.main_window.findChildren(QDockWidget):
+            if dock.objectName() != "SidebarDock":
                 dock.close()
-            except RuntimeError:
-                pass

@@ -4,7 +4,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 
-def setup_logging(app_name="StealthAssist"):
+def setup_logging(app_name="VNNotes"):
     """
     Sets up the application logging infrastructure.
     Uses RotatingFileHandler to manage log file sizes.
