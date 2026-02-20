@@ -6,6 +6,40 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QFont, QAction
 
+class NoteTreeWidget(QTreeWidget):
+    """Custom QTreeWidget that restricts drag-drop: notes can only be dropped onto folders."""
+
+    def __init__(self, sidebar, parent=None):
+        super().__init__(parent)
+        self._sidebar = sidebar
+
+    def dropEvent(self, event):
+        target_item = self.itemAt(event.position().toPoint())
+        source_item = self.currentItem()
+
+        if source_item and target_item:
+            source_data = source_item.data(0, Qt.ItemDataRole.UserRole)
+            target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
+
+            # Only allow: note → folder. Block note → note, or anything else.
+            if source_data and target_data:
+                if source_data.get("type") == "note" and target_data.get("type") == "folder":
+                    new_folder = target_data["name"]
+                    note_obj_name = source_data["obj_name"]
+                    if self._sidebar.note_service.move_note(note_obj_name, new_folder):
+                        self._sidebar.note_service.save_to_disk()
+                    self._sidebar.refresh_tree()
+                    event.accept()
+                    return
+
+            # Block all other drops (note→note, etc.)
+            event.ignore()
+            return
+
+        # If dropping outside any item (e.g. rearranging within same folder visual), ignore
+        event.ignore()
+
+
 class SidebarWidget(QWidget):
     """
     Sidebar for managing folders and tags.
@@ -25,7 +59,7 @@ class SidebarWidget(QWidget):
         
     def setup_ui(self):
         # 1. Initialize Tree FIRST
-        self.tree = QTreeWidget()
+        self.tree = NoteTreeWidget(self)
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(15)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -411,32 +445,6 @@ class SidebarWidget(QWidget):
                 self.note_service.save_to_disk()
                 self.refresh_tree() # Moving to General is complex to animate, easiest to refresh
 
-    def dropEvent(self, event):
-        """Handle drop event to update data model."""
-        # Get source item
-        source_item = self.tree.currentItem()
-        if not source_item: return
-        
-        # Get target item
-        target_item = self.tree.itemAt(event.position().toPoint())
-        if not target_item: return
-        
-        source_data = source_item.data(0, Qt.ItemDataRole.UserRole)
-        target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
-        
-        if source_data["type"] == "note" and target_data["type"] == "folder":
-            # Move note to new folder
-            note_obj_name = source_data["obj_name"]
-            new_folder = target_data["name"]
-            
-            if self.note_service.move_note(note_obj_name, new_folder):
-                self.note_service.save_to_disk()
-                # self.refresh_tree() -> handled by drag drop visual? 
-                # QTreeWidget InternalMove handles the visual move.
-                # We just needed to update backend.
-                pass
-            
-        event.accept()
 
                 
     def _group_notes_by_folder(self, notes):
