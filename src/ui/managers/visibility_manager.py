@@ -59,29 +59,43 @@ class VisibilityManager:
         """Hide or show the entire application (including floating docks)."""
         from src.features.browser.browser_pane import BrowserPane
 
-        all_docks = self.mw.findChildren(QDockWidget)
-        all_browsers = self.mw.findChildren(BrowserPane)
-
         if self.mw.isVisible():
+            # Capture state BEFORE hiding
+            all_docks = self.mw.findChildren(QDockWidget)
+            all_browsers = self.mw.findChildren(BrowserPane)
+
             self.mw.hide()
             for dock in all_docks:
                 if dock.isFloating() and dock.isVisible():
                     dock.hide()
                     dock.setProperty("was_floating_visible", True)
+            # Mark browsers that were visible so we can restore them
             for browser in all_browsers:
-                browser.hide()
+                if browser.isVisible():
+                    browser.setProperty("was_visible", True)
+                    browser.hide()
         else:
             self.mw.show()
             self.mw.activateWindow()
             self.mw.raise_()
 
             def restore_docks():
+                all_docks = self.mw.findChildren(QDockWidget)
+                all_browsers = self.mw.findChildren(BrowserPane)
                 for dock in all_docks:
                     try:
                         if dock.property("was_floating_visible") or \
                            (not dock.isFloating() and not dock.isVisible()):
                             dock.show()
                             dock.setProperty("was_floating_visible", False)
+                    except RuntimeError:
+                        continue
+                # Restore browsers that were visible before hiding
+                for browser in all_browsers:
+                    try:
+                        if browser.property("was_visible"):
+                            browser.show()
+                            browser.setProperty("was_visible", False)
                     except RuntimeError:
                         continue
                 self.mw.menuBar().raise_()

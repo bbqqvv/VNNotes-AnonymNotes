@@ -3,6 +3,7 @@ import os
 import logging
 import threading
 import hashlib
+import shutil
 from PyQt6.QtCore import QStandardPaths, QObject, QTimer, pyqtSlot
 
 class StorageManager(QObject):
@@ -94,13 +95,24 @@ class StorageManager(QObject):
                 temp_path = self.file_path + ".tmp"
                 with open(temp_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())  # Ensure data is flushed to disk before rename
                 
-                # Robust Atomic Replace with Retry (Windows handles locks poorly)
+                # Robust Atomic Replace with Retry
+                # On Windows, use shutil.copy2 as fallback to avoid PermissionError
                 import time
                 for i in range(5):
                     try:
                         if os.path.exists(self.file_path):
-                            os.replace(temp_path, self.file_path)
+                            try:
+                                os.replace(temp_path, self.file_path)
+                            except PermissionError:
+                                # Fallback for Windows file lock: copy then delete temp
+                                shutil.copy2(temp_path, self.file_path)
+                                try:
+                                    os.remove(temp_path)
+                                except Exception:
+                                    pass
                         else:
                             os.rename(temp_path, self.file_path)
                         break # Success
@@ -122,6 +134,7 @@ class StorageManager(QObject):
         """
         Loads data from JSON file into shared cache.
         Robust to Windows file locks with retries.
+        Auto-recovers from corrupt JSON by backing up and starting fresh.
         """
         if self._data is not None:
              return self._data
@@ -149,13 +162,18 @@ class StorageManager(QObject):
                 time.sleep(0.05 * (i + 1))
             except json.JSONDecodeError as e:
                 logging.error(f"StorageManager JSON Corrupt: {e}")
-                # Corrupt file is a critical failure. 
-                # We return None so the service doesn't overwrite it immediately.
-                return None
+                # AUTO-RECOVER: Backup the corrupt file and start fresh.
+                # This prevents a one-time write corruption from permanently breaking the app.
+                try:
+                    corrupt_backup = self.file_path + ".corrupt"
+                    shutil.copy2(self.file_path, corrupt_backup)
+                    logging.warning(f"StorageManager: Corrupt data.json backed up to {corrupt_backup}. Starting fresh.")
+                except Exception as backup_err:
+                    logging.error(f"StorageManager: Could not backup corrupt file: {backup_err}")
+                self._data = {}
+                return self._data
             except Exception as e:
                 logging.error(f"StorageManager Load Error: {e}", exc_info=True)
                 return None
                 
         return None # Indicate persistent failure
-
-

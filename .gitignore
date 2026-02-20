@@ -24,10 +24,12 @@ StealthAssist.spec
 tools/dist/
 tools/build/
 tools/data.zip
+tools/data.7z
 tools/*.spec
 
 # User data (Sensitive)
 data.json
+error_log.txt
 *.ini
 .gemini/
 

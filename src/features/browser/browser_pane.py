@@ -94,8 +94,6 @@ class StealthWebView(QWebEngineView):
             menu.insertSeparator(first_action)
             
         menu.exec(event.globalPos())
-            
-        menu.exec(event.globalPos())
 
 from PyQt6.QtCore import QUrl, Qt, pyqtSignal
 

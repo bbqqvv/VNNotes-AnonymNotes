@@ -277,7 +277,7 @@ class FindManager:
             self._match_label.setText("")
             self._find_total = 0
             self._find_current_index = 0
-            self._find_input.setStyleSheet("")
+            self._reset_input_style()
             self.reposition()
             return
         self._count_matches(text)
@@ -364,11 +364,25 @@ class FindManager:
             self._match_label.setText("No results" if text else "")
             if text:
                 self._find_input.setStyleSheet(
-                    f"QPlainTextEdit {{ background: {t['no_match_bg']}; "
-                    f"border-color: {t['no_match_border']}; }}")
+                    f"QPlainTextEdit#FindInput {{ background: {t['no_match_bg']}; "
+                    f"color: {t['input_text']}; "
+                    f"border: 1px solid {t['no_match_border']}; "
+                    f"border-radius: 3px; padding: 2px 6px; "
+                    f"font-size: 13px; }}")
             else:
-                self._find_input.setStyleSheet("")
+                self._reset_input_style()
         else:
             self._match_label.setText(
                 f"{self._find_current_index} of {self._find_total}")
-            self._find_input.setStyleSheet("")
+            self._reset_input_style()
+
+    def _reset_input_style(self):
+        """Restore FindInput to the correct dark/light style (never plain empty string)."""
+        t = self._get_palette()
+        self._find_input.setStyleSheet(
+            f"QPlainTextEdit#FindInput {{ "
+            f"background: {t['input_bg']}; "
+            f"color: {t['input_text']}; "
+            f"border: 1px solid {t['input_border']}; "
+            f"border-radius: 3px; padding: 2px 6px; "
+            f"font-size: 13px; font-family: 'Consolas', 'Segoe UI', monospace; }}")
