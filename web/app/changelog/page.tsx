@@ -21,11 +21,11 @@ export default function Changelog() {
                         isLatest={true}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">Bug Fix – Browser Pane Disappears:</strong> Fixed <kbd className="bg-white/10 px-1 rounded text-xs">Ctrl+Shift+Space</kbd> causing the browser pane to vanish permanently after toggling visibility twice.</li>
-                            <li><strong className="text-white">Bug Fix – Layout Break on Context Menu:</strong> Removed a duplicate <code className="bg-white/10 px-1 rounded text-xs">menu.exec()</code> call in the browser pane that caused UI layout corruption on right-click.</li>
-                            <li><strong className="text-white">Bug Fix – Data Corruption Crash:</strong> Resolved a crash caused by a corrupt <code className="bg-white/10 px-1 rounded text-xs">data.json</code> from a Windows <code className="bg-white/10 px-1 rounded text-xs">PermissionError</code> during atomic file write. Corrupt files are now automatically backed up and the app recovers cleanly.</li>
-                            <li><strong className="text-white">Bug Fix – Find Bar Dark Theme:</strong> Fixed the search/find bar input appearing with a light background when using dark theme, caused by an empty stylesheet reset overriding palette colors.</li>
-                            <li><strong className="text-white">Stability – Atomic Write on Windows:</strong> Upgraded file save logic to use <code className="bg-white/10 px-1 rounded text-xs">shutil.copy2</code> fallback and <code className="bg-white/10 px-1 rounded text-xs">fsync()</code> to ensure data integrity and prevent PermissionError lockups on Windows 10/11.</li>
+                            <li><strong className="text-white">Sửa lỗi – Trình duyệt biến mất:</strong> Trước đây nhấn <kbd className="bg-white/10 px-1 rounded text-xs">Ctrl+Shift+Space</kbd> hai lần liên tiếp khiến cửa sổ trình duyệt tích hợp biến mất hoàn toàn. Lỗi này đã được sửa.</li>
+                            <li><strong className="text-white">Sửa lỗi – Giao diện bị vỡ khi click chuột phải:</strong> Click chuột phải vào trình duyệt đôi khi làm bố cục giao diện bị lệch. Đã được khắc phục hoàn toàn.</li>
+                            <li><strong className="text-white">Sửa lỗi – App bị crash khi khởi động lại:</strong> Một số trường hợp tắt app đột ngột hoặc máy tính bị giật có thể khiến dữ liệu lưu bị hỏng, gây crash ở lần mở tiếp theo. App giờ tự động phát hiện và phục hồi mà không mất dữ liệu quan trọng.</li>
+                            <li><strong className="text-white">Sửa lỗi – Ô tìm kiếm bị trắng ở chế độ tối:</strong> Khi dùng giao diện tối (dark mode), ô Search/Find hiển thị nền trắng trông rất lạc quẻ. Đã được sửa để hiển thị đúng màu tối.</li>
+                            <li><strong className="text-white">Cải thiện – Lưu dữ liệu ổn định hơn trên Windows:</strong> Cơ chế lưu file được nâng cấp để hoạt động tốt hơn trên Windows 10/11, đặc biệt với các máy có phần mềm diệt virus hoặc bảo mật chạy ngầm — giảm nguy cơ mất dữ liệu khi lưu.</li>
                         </ul>
                     </ChangelogEntry>
 
