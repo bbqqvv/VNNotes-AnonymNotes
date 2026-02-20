@@ -21,11 +21,11 @@ export default function Changelog() {
                         isLatest={true}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">Sửa lỗi – Trình duyệt biến mất:</strong> Trước đây nhấn <kbd className="bg-white/10 px-1 rounded text-xs">Ctrl+Shift+Space</kbd> hai lần liên tiếp khiến cửa sổ trình duyệt tích hợp biến mất hoàn toàn. Lỗi này đã được sửa.</li>
-                            <li><strong className="text-white">Sửa lỗi – Giao diện bị vỡ khi click chuột phải:</strong> Click chuột phải vào trình duyệt đôi khi làm bố cục giao diện bị lệch. Đã được khắc phục hoàn toàn.</li>
-                            <li><strong className="text-white">Sửa lỗi – App bị crash khi khởi động lại:</strong> Một số trường hợp tắt app đột ngột hoặc máy tính bị giật có thể khiến dữ liệu lưu bị hỏng, gây crash ở lần mở tiếp theo. App giờ tự động phát hiện và phục hồi mà không mất dữ liệu quan trọng.</li>
-                            <li><strong className="text-white">Sửa lỗi – Ô tìm kiếm bị trắng ở chế độ tối:</strong> Khi dùng giao diện tối (dark mode), ô Search/Find hiển thị nền trắng trông rất lạc quẻ. Đã được sửa để hiển thị đúng màu tối.</li>
-                            <li><strong className="text-white">Cải thiện – Lưu dữ liệu ổn định hơn trên Windows:</strong> Cơ chế lưu file được nâng cấp để hoạt động tốt hơn trên Windows 10/11, đặc biệt với các máy có phần mềm diệt virus hoặc bảo mật chạy ngầm — giảm nguy cơ mất dữ liệu khi lưu.</li>
+                            <li><strong className="text-white">Fix – Built-in Browser Disappears:</strong> Pressing <kbd className="bg-white/10 px-1 rounded text-xs">Ctrl+Shift+Space</kbd> twice in a row used to make the built-in browser window vanish completely. Now fixed.</li>
+                            <li><strong className="text-white">Fix – Layout Breaks on Right-Click:</strong> Right-clicking inside the browser sometimes caused the app layout to shift or break. This has been fully resolved.</li>
+                            <li><strong className="text-white">Fix – App Crashes on Next Launch:</strong> In some cases — such as a force-close or unexpected shutdown — saved data could become corrupted, causing the app to crash on the next start. The app now automatically detects and recovers from this without losing important data.</li>
+                            <li><strong className="text-white">Fix – Search Bar Shows White in Dark Mode:</strong> The Search/Find input box appeared with a bright white background when using dark mode, looking completely out of place. Now correctly styled to match the dark theme.</li>
+                            <li><strong className="text-white">Improvement – More Reliable Saving on Windows:</strong> The file saving system has been upgraded to work better on Windows 10/11, especially on machines running antivirus or security software in the background — reducing the risk of data loss during save.</li>
                         </ul>
                     </ChangelogEntry>
 
