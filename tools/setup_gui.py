@@ -229,49 +229,91 @@ SOFTWARE."""
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, d)
 
-    def start_install(self):
-        self.install_dir = self.path_entry.get()
-        self.show_frame("Installing")
-        threading.Thread(target=self.run_install, daemon=True).start()
+    def _get_registry_install_dir(self):
+        """Check Windows Registry for an existing VNNotes installation path."""
+        try:
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VNNotes"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                install_location, _ = winreg.QueryValueEx(key, "InstallLocation")
+                return install_location
+        except Exception:
+            return None
+
+    def _write_uninstall_registry(self, install_dir):
+        """Write standard Windows uninstall registry entry (shows in Apps & Features)."""
+        try:
+            import winreg
+            key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VNNotes"
+            exe_path = os.path.join(install_dir, "VNNotes.exe")
+            uninstall_path = os.path.join(install_dir, "Uninstall.exe")
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                winreg.SetValueEx(key, "DisplayName",        0, winreg.REG_SZ, "VNNotes")
+                winreg.SetValueEx(key, "DisplayVersion",     0, winreg.REG_SZ, "1.1.1")
+                winreg.SetValueEx(key, "Publisher",          0, winreg.REG_SZ, "VTech Digital Solution")
+                winreg.SetValueEx(key, "InstallLocation",    0, winreg.REG_SZ, install_dir)
+                winreg.SetValueEx(key, "DisplayIcon",        0, winreg.REG_SZ, exe_path)
+                winreg.SetValueEx(key, "UninstallString",    0, winreg.REG_SZ, f'"{uninstall_path}"')
+                winreg.SetValueEx(key, "NoModify",           0, winreg.REG_DWORD, 1)
+                winreg.SetValueEx(key, "NoRepair",           0, winreg.REG_DWORD, 1)
+        except Exception as e:
+            print(f"Registry write warning: {e}")
 
     def run_install(self):
         try:
-            if os.path.exists(self.install_dir):
-                self.status_label.config(text="Preparing directory...")
-                # Try to avoid full wipe if user selected a custom dir with files
-                # But for app integrity, we usually replace.
-            
+            # ── Step 1: Detect & cleanly remove previous installation ──────────
+            old_dir = self._get_registry_install_dir()
+            if old_dir and os.path.exists(old_dir) and old_dir != self.install_dir:
+                self.status_label.config(text="Removing previous version...")
+                self.update_idletasks()
+                try:
+                    shutil.rmtree(old_dir, ignore_errors=True)
+                except Exception:
+                    pass
+            elif os.path.exists(self.install_dir):
+                # Same install location: clean it to avoid stale files from old version
+                self.status_label.config(text="Upgrading existing installation...")
+                self.update_idletasks()
+                try:
+                    shutil.rmtree(self.install_dir, ignore_errors=True)
+                except Exception:
+                    pass
+
+            # ── Step 2: Create fresh install directory ─────────────────────────
             os.makedirs(self.install_dir, exist_ok=True)
-            
-            # Determine archive path
+
+            # ── Step 3: Locate archive ─────────────────────────────────────────
             tmp_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
             archive_path = os.path.join(tmp_dir, "data.7z")
-            
             if not os.path.exists(archive_path):
-                # Fallback for dev environment
                 archive_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools/data.7z")
 
-            # Extract using py7zr
+            # ── Step 4: Extract ────────────────────────────────────────────────
             with py7zr.SevenZipFile(archive_path, mode='r') as archive:
-                # py7zr doesn't provide a direct way to get namelist() and iterate with progress
-                # We'll extract all and then update progress to 100%
                 self.status_label.config(text="Extracting files...")
                 self.update_idletasks()
                 archive.extractall(path=self.install_dir)
-            
-            # 4. Hide Resources folder for professionalism
+
+            # ── Step 5: Hide Resources folder ─────────────────────────────────
             res_dir = os.path.join(self.install_dir, "Resources")
             if os.path.exists(res_dir):
-                # Set Hidden attribute on Windows
                 FILE_ATTRIBUTE_HIDDEN = 0x02
                 ctypes.windll.kernel32.SetFileAttributesW(res_dir, FILE_ATTRIBUTE_HIDDEN)
-                        
+
+            # ── Step 6: Write Windows Registry (Apps & Features entry) ─────────
+            self.status_label.config(text="Registering application...")
+            self.update_idletasks()
+            self._write_uninstall_registry(self.install_dir)
+
             self.progress['value'] = 100
             self.status_label.config(text="Installation successful.")
             self.after(800, lambda: self.show_frame("Finished"))
         except Exception as e:
             messagebox.showerror("Installation Error", str(e))
             self.destroy()
+
+
 
     def finish(self):
         exe_path = os.path.join(self.install_dir, "VNNotes.exe")
