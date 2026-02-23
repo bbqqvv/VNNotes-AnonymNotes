@@ -1,5 +1,6 @@
 import json
 import os
+import copy
 import logging
 import threading
 import hashlib
@@ -15,11 +16,15 @@ class StorageManager(QObject):
     def __init__(self, filename="data.json"):
         super().__init__()
         base_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        if not os.path.exists(base_path):
-            os.makedirs(base_path)
-            
         self.file_path = os.path.join(base_path, filename)
+        
+        # New: Notes directory for distributed storage
+        self.notes_dir = os.path.join(base_path, "notes")
+        if not os.path.exists(self.notes_dir):
+            os.makedirs(self.notes_dir)
+            
         logging.info(f"StorageManager initialized. Data path: {self.file_path}")
+        logging.info(f"Notes directory: {self.notes_dir}")
         self._last_save_hash = None
         self._save_lock = threading.Lock()
         self._data = None # Shared in-memory cache
@@ -39,7 +44,7 @@ class StorageManager(QObject):
         try:
             json_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
             return hashlib.md5(json_str.encode('utf-8')).hexdigest()
-        except:
+        except Exception:
             return None
 
     def save_data(self, data, async_save=True):
@@ -56,8 +61,7 @@ class StorageManager(QObject):
         
         if not async_save:
             self._get_throttle_timer().stop()
-            # Deep copy on MAIN thread for safety
-            payload = json.loads(json.dumps(data))
+            payload = copy.deepcopy(data)
             return self._perform_save(payload)
             
         # Restart throttle timer (batching)
@@ -68,28 +72,31 @@ class StorageManager(QObject):
         """Forces an immediate save of whatever is in the cache."""
         if self._data is not None:
             self._get_throttle_timer().stop()
-            payload = json.loads(json.dumps(self._data))
+            with self._save_lock:
+                payload = copy.deepcopy(self._data)
             self._perform_save(payload)
 
     @pyqtSlot()
     def _on_throttle_timeout(self):
         """Triggered after the quiet period. Performs background write."""
         if self._data is not None:
-            # Hash check again to be sure
-            current_hash = self._calculate_hash(self._data)
-            if current_hash != self._last_save_hash:
-                # Deep copy on MAIN thread BEFORE starting thread
-                try:
-                    payload = json.loads(json.dumps(self._data))
-                    thread = threading.Thread(target=self._perform_save, args=(payload,), daemon=True)
-                    thread.start()
-                except Exception as e:
-                    logging.error(f"StorageManager Copy Error: {e}")
+            with self._save_lock:
+                current_hash = self._calculate_hash(self._data)
+                if current_hash != self._last_save_hash:
+                    try:
+                        payload = copy.deepcopy(self._data)
+                    except Exception as e:
+                        logging.error(f"StorageManager Copy Error: {e}")
+                        return
+                else:
+                    return
+            thread = threading.Thread(target=self._perform_save, args=(payload, current_hash), daemon=True)
+            thread.start()
 
-    def _perform_save(self, data):
+    def _perform_save(self, data, precomputed_hash=None):
         """Actual disk I/O operation."""
         try:
-            current_hash = self._calculate_hash(data)
+            current_hash = precomputed_hash or self._calculate_hash(data)
             
             with self._save_lock:
                 temp_path = self.file_path + ".tmp"
@@ -177,3 +184,107 @@ class StorageManager(QObject):
                 return None
                 
         return None # Indicate persistent failure
+
+    # --- Distributed Storage Methods ---
+    
+    def get_note_path(self, obj_name):
+        """Returns the absolute path for a specific note slug/id."""
+        return os.path.join(self.notes_dir, f"{obj_name}.html")
+
+    def save_note_content(self, obj_name, content):
+        """
+        Atomically saves a note's HTML content.
+        Pattern: write .tmp → fsync → rename old → .bak → rename .tmp → target.
+        If power is cut between steps, .bak always holds the last good version.
+        """
+        path = self.get_note_path(obj_name)
+        tmp_path = path + ".tmp"
+        bak_path = path + ".bak"
+        try:
+            # Step 1: Write to temp file and flush to OS buffer
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Step 2: Back up current file (last good version)
+            if os.path.exists(path):
+                try:
+                    os.replace(bak_path, bak_path + '.old') if os.path.exists(bak_path) else None
+                    os.replace(path, bak_path)
+                except Exception as bak_err:
+                    logging.warning(f"StorageManager: Could not create .bak for {obj_name}: {bak_err}")
+
+            # Step 3: Atomically replace target with new content
+            try:
+                os.replace(tmp_path, path)  # Atomic on same filesystem
+            except OSError:
+                # Cross-device fallback (e.g. symlinked to another drive)
+                import shutil
+                shutil.move(tmp_path, path)
+
+            logging.debug(f"StorageManager: Atomic save OK → {path}")
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager: Error saving note {obj_name}: {e}")
+            # Cleanup orphan temp file
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except: pass
+            return False
+
+    def load_note_content(self, obj_name):
+        """
+        Loads a note's HTML content from disk.
+        - Unicode hardened: errors='replace' + null byte strip.
+        - Crash recovery journal: if target is missing/empty but .bak exists,
+          auto-restores from .bak (covers power cut mid-save).
+        - Also detects leftover .tmp files from previous crash for logging.
+        """
+        path = self.get_note_path(obj_name)
+        bak_path = path + ".bak"
+        tmp_path = path + ".tmp"
+
+        # Crash journal: alert if a .tmp file is leftover from a crash
+        if os.path.exists(tmp_path):
+            logging.warning(f"StorageManager: Found orphan .tmp for {obj_name} — previous session may have crashed during save.")
+
+        # Determine which file to actually read
+        use_bak = False
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            if os.path.exists(bak_path) and os.path.getsize(bak_path) > 0:
+                logging.warning(f"StorageManager: Main file missing/empty for {obj_name}. Auto-restoring from .bak.")
+                use_bak = True
+            elif not os.path.exists(path):
+                logging.warning(f"StorageManager: Note file not found: {path}")
+                return ""
+
+        read_path = bak_path if use_bak else path
+        try:
+            with open(read_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            # Strip null bytes — common artifact of corrupted/partial writes
+            content = content.replace('\x00', '')
+            if use_bak:
+                # Commit backup as the canonical file so future saves are consistent
+                try:
+                    import shutil
+                    shutil.copy2(bak_path, path)
+                except Exception:
+                    pass
+            return content
+        except Exception as e:
+            logging.error(f"StorageManager: Error loading note {obj_name}: {e}")
+            return ""
+
+    def delete_note_content(self, obj_name):
+        """Deletes the physical file associated with a note."""
+        path = self.get_note_path(obj_name)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                logging.info(f"StorageManager: Deleted note file {path}")
+                return True
+            except Exception as e:
+                logging.error(f"StorageManager: Error deleting note file {obj_name}: {e}")
+        return False

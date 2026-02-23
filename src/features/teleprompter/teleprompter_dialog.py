@@ -1,227 +1,371 @@
 import logging
+import os
+import re
+import base64
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QTextEdit, QHBoxLayout, 
+    QDialog, QVBoxLayout, QTextEdit, QHBoxLayout,
     QPushButton, QSlider, QLabel, QWidget, QFrame, QApplication, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QPoint
-from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QPainter, QAction, QTextCursor, QTextCharFormat, QTextDocument
-import os
+from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QFont, QColor, QIcon, QTextCursor, QTextCharFormat, QImage
+from PyQt6.QtCore import QUrl
+from src.utils.ui_utils import get_icon_dir, get_icon
+
+
+# Default palette (zinc) — used when no theme config is passed
+_DEFAULT_THEME = {
+    "bg": "#09090b", "surface": "#18181b", "border": "#27272a",
+    "text": "#f4f4f5", "text_muted": "#a1a1aa", "accent": "#3b82f6",
+    "is_dark": True
+}
+
 
 class TeleprompterDialog(QDialog):
-    def __init__(self, text_content="", parent=None):
+    """Premium, theme-aware Stealth Teleprompter."""
+
+    def __init__(self, text_content="", parent=None, theme_config=None):
         super().__init__(parent)
         try:
             logging.info("Initializing TeleprompterDialog...")
             self.setWindowTitle("Stealth Teleprompter")
-            self.resize(700, 450)
-            
+            self.resize(720, 480)
+
+            # Theme
+            self.tc = theme_config or _DEFAULT_THEME
+
             # Window Flags: Frameless, Always on Top
             self.setWindowFlags(
-                Qt.WindowType.FramelessWindowHint | 
+                Qt.WindowType.FramelessWindowHint |
                 Qt.WindowType.WindowStaysOnTopHint
             )
-            
-            # Translucency
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-            
+
             # Enable Stealth (Anti-Capture)
             from src.core.stealth import StealthManager
             hwnd = int(self.winId())
-            logging.info(f"Teleprompter HWND: {hwnd}")
-            
-            if not StealthManager.set_stealth_mode(hwnd, True):
-                logging.warning("Failed to enable stealth mode for Teleprompter")
-                
-            # Explicitly DISABLE click-through on start
+            StealthManager.set_stealth_mode(hwnd, True)
             StealthManager.set_click_through(hwnd, False)
-            
-            # Data
+
+            # State
             self.scroll_speed = 2
             self.is_playing = False
             self.font_size = 24
-            self.opacity_val = 0.8
+            self.opacity_val = 0.85
             self.is_click_through = False
-            
-            # Paths
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            self.icon_dir = os.path.join(base_path, "assets", "icons", "dark_theme")
-            logging.info(f"Icon Dir: {self.icon_dir}")
 
-            # Timer for scrolling
+            # Icon paths
+            is_dark = self.tc.get("is_dark", True)
+            self.icon_dir = get_icon_dir(is_dark)
+
+            # Scroll timer
             self.scroll_timer = QTimer(self)
-            self.scroll_timer.timeout.connect(self.scroll_text)
-            self.scroll_timer.setInterval(50) 
-            
-            self.init_ui(text_content)
-            self.setup_drag_behavior()
-            
-            # Initial Opacity
-            self.setWindowOpacity(self.opacity_val)
+            self.scroll_timer.timeout.connect(self._scroll_step)
+            self.scroll_timer.setInterval(50)
+
+            self._build_ui(text_content)
+            self._setup_drag()
+
+            # Fade-in animation
+            self.setWindowOpacity(0.0)
+            self._fade_anim = QPropertyAnimation(self, b"windowOpacity")
+            self._fade_anim.setDuration(250)
+            self._fade_anim.setStartValue(0.0)
+            self._fade_anim.setEndValue(self.opacity_val)
+            self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._fade_anim.start()
+
             logging.info("TeleprompterDialog initialized successfully.")
-            
         except Exception as e:
             logging.critical(f"Failed to initialize TeleprompterDialog: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Teleprompter: {e}")
 
-    def init_ui(self, content):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # --- Main Background Frame ---
+    # ── UI Construction ──────────────────────────────────────────────
+
+    def _build_ui(self, content):
+        tc = self.tc
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # ── Main Glass Frame ──
         self.bg_frame = QFrame(self)
         self.bg_frame.setObjectName("HudFrame")
-        self.bg_frame.setStyleSheet("""
-            QFrame#HudFrame {
-                background-color: rgba(0, 0, 0, 180);
-                border-radius: 8px;
-                border: 1px solid rgba(255, 255, 255, 30);
-            }
+        self._apply_frame_style(locked=False)
+
+        inner = QVBoxLayout(self.bg_frame)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(0)
+
+        # ── Header ──
+        header = QFrame()
+        header.setFixedHeight(40)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: {tc['surface']};
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+                border-bottom: 1px solid {tc['border']};
+            }}
         """)
-        bg_layout = QVBoxLayout(self.bg_frame)
-        bg_layout.setContentsMargins(15, 15, 15, 15)
-        
-        # --- Header (Draggable Area + Close) ---
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(14, 0, 8, 0)
+        h_layout.setSpacing(8)
+
         # Drag Handle
         self.drag_handle = QLabel()
-        drag_icon_path = os.path.join(self.icon_dir, "drag_handle.svg")
-        if os.path.exists(drag_icon_path):
-            self.drag_handle.setPixmap(QIcon(drag_icon_path).pixmap(20, 20))
+        drag_path = os.path.join(self.icon_dir, "drag_handle.svg")
+        if os.path.exists(drag_path):
+            self.drag_handle.setPixmap(QIcon(drag_path).pixmap(32, 32))
+            self.drag_handle.setFixedSize(16, 16)
+            self.drag_handle.setScaledContents(True)
         else:
-            self.drag_handle.setText("::") # Fallback
-            
-        self.drag_handle.setStyleSheet("background: transparent; color: white;")
-        self.drag_handle.setToolTip("Drag here to move")
-        
-        self.title_lbl = QLabel("Teleprompter")
-        self.title_lbl.setStyleSheet("color: rgba(255, 255, 255, 180); font-weight: 600; font-size: 14px; font-family: 'Segoe UI';")
-        
-        self.btn_click_through = QPushButton()
-        self.btn_click_through.setCheckable(True)
-        self.btn_click_through.setFixedSize(28, 28)
-        self.btn_click_through.setIcon(QIcon(os.path.join(self.icon_dir, "lock.svg")))
-        self.btn_click_through.setIconSize(QSize(16, 16))
-        self.btn_click_through.setToolTip("Enable Click-Through Mode (Lock Position)\nUnlock with Ctrl+Shift+F9")
-        self.btn_click_through.toggled.connect(self.toggle_click_through)
-        self.style_hud_button(self.btn_click_through)
+            self.drag_handle.setText("::")
+        self.drag_handle.setStyleSheet("background: transparent;")
+        self.drag_handle.setToolTip("Drag to move")
+        self.drag_handle.setCursor(Qt.CursorShape.SizeAllCursor)
 
-        self.btn_close = QPushButton()
-        self.btn_close.setFixedSize(28, 28)
-        self.btn_close.setIcon(QIcon(os.path.join(self.icon_dir, "close.svg")))
-        self.btn_close.setIconSize(QSize(16, 16))
-        self.btn_close.clicked.connect(self.close)
-        self.style_hud_button(self.btn_close, is_close=True)
-        
-        header_layout.addWidget(self.drag_handle)
-        header_layout.addSpacing(5)
-        header_layout.addWidget(self.title_lbl)
-        header_layout.addStretch()
-        header_layout.addWidget(self.btn_click_through)
-        header_layout.addSpacing(5)
-        header_layout.addWidget(self.btn_close)
-        
-        # --- Toast Message Overlay ---
-        self.toast_lbl = QLabel("Click-Through Enabled\nPress Ctrl+Shift+F9 to Unlock", self)
-        self.toast_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.toast_lbl.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 200);
-            color: #10b981;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            padding: 10px;
-            border: 1px solid #10b981;
+        # Title
+        self.title_lbl = QLabel("TELEPROMPTER")
+        self.title_lbl.setStyleSheet(f"""
+            color: {tc['text_muted']};
+            font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            background: transparent;
         """)
-        self.toast_lbl.adjustSize()
-        self.toast_lbl.hide()
 
-        # --- Text Area ---
+        # Play state indicator dot
+        self.state_dot = QLabel("●")
+        self.state_dot.setStyleSheet(f"color: {tc['text_muted']}; font-size: 8px; background: transparent;")
+
+        # Lock button
+        is_dark = tc.get("is_dark", True)
+        self.btn_lock = self._make_header_btn("lock.svg", "Enable Click-Through (Ctrl+Shift+F9)", is_dark=is_dark)
+        self.btn_lock.setCheckable(True)
+        self.btn_lock.toggled.connect(self._toggle_click_through)
+
+        # Close button
+        self.btn_close = self._make_header_btn("close.svg", "Close", is_dark=is_dark, is_close=True)
+        self.btn_close.clicked.connect(self.close)
+
+        h_layout.addWidget(self.drag_handle)
+        h_layout.addSpacing(4)
+        h_layout.addWidget(self.title_lbl)
+        h_layout.addSpacing(4)
+        h_layout.addWidget(self.state_dot)
+        h_layout.addStretch()
+        h_layout.addWidget(self.btn_lock)
+        h_layout.addWidget(self.btn_close)
+
+        # ── Text Area ──
         self.text_edit = QTextEdit()
-        self.set_html_safe(content)
+        self._set_html_safe(content)
         self.text_edit.setReadOnly(True)
         self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
                 background: transparent;
                 border: none;
-                color: white;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                color: {tc['text']};
+                font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', sans-serif;
                 font-size: {self.font_size}px;
-                line-height: 1.6;
+                padding: 16px 20px;
+                line-height: 1.8;
             }}
         """)
-        
-        # --- Controls Container (Auto-hide) ---
-        self.controls_widget = QWidget()
-        self.controls_widget.setFixedHeight(50)
-        self.controls_widget.setStyleSheet("""
-            QWidget {
-                background-color: rgba(30, 30, 30, 200);
-                border-radius: 25px;
-            }
+
+        # ── Controls Pill ──
+        self.controls = QWidget()
+        self.controls.setFixedHeight(46)
+        self.controls.setStyleSheet(f"""
+            QWidget {{
+                background: {tc['surface']};
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+                border-top: 1px solid {tc['border']};
+            }}
         """)
-        controls_layout = QHBoxLayout(self.controls_widget)
-        controls_layout.setContentsMargins(15, 5, 15, 5)
-        
+        c_layout = QHBoxLayout(self.controls)
+        c_layout.setContentsMargins(16, 0, 16, 0)
+        c_layout.setSpacing(6)
+
         # Play/Pause
         self.btn_play = QPushButton()
         self.btn_play.setCheckable(True)
-        self.btn_play.setFixedSize(36, 36)
-        self.btn_play.setIcon(QIcon(os.path.join(self.icon_dir, "play.svg")))
-        self.btn_play.setIconSize(QSize(20, 20))
-        self.btn_play.toggled.connect(self.toggle_play)
-        self.style_hud_button(self.btn_play)
-        
-        # Speed
-        icon_speed = QIcon(os.path.join(self.icon_dir, "speed.svg"))
-        self.slide_speed = self.create_slider(1, 10, self.scroll_speed, self.set_speed, icon_speed, "Speed")
+        self.btn_play.setFixedSize(32, 32)
+        self.btn_play.setIcon(get_icon("play.svg", is_dark))
+        self.btn_play.setIconSize(QSize(16, 16))
+        self.btn_play.toggled.connect(self._toggle_play)
+        self._style_control_btn(self.btn_play)
 
-        # Font
-        icon_text = QIcon(os.path.join(self.icon_dir, "text_size.svg"))
-        self.slide_font = self.create_slider(12, 72, self.font_size, self.set_font_size, icon_text, "Font Size")
+        # Speed slider
+        speed_icon = self._make_icon_label("speed.svg")
+        self.slide_speed = self._make_slider(1, 10, self.scroll_speed, self._set_speed, "Speed")
 
-        # Opacity
-        icon_opacity = QIcon(os.path.join(self.icon_dir, "opacity.svg"))
-        self.slide_opacity = self.create_slider(20, 100, int(self.opacity_val * 100), self.set_opacity, icon_opacity, "Opacity")
+        # Font slider
+        font_icon = self._make_icon_label("text_size.svg")
+        self.slide_font = self._make_slider(12, 72, self.font_size, self._set_font_size, "Font Size")
 
-        controls_layout.addWidget(self.btn_play)
-        controls_layout.addSpacing(15)
-        controls_layout.addWidget(QLabel("", pixmap=icon_speed.pixmap(16, 16)))
-        controls_layout.addWidget(self.slide_speed)
-        controls_layout.addSpacing(10)
-        controls_layout.addWidget(QLabel("", pixmap=icon_text.pixmap(16, 16)))
-        controls_layout.addWidget(self.slide_font)
-        controls_layout.addSpacing(10)
-        controls_layout.addWidget(QLabel("", pixmap=icon_opacity.pixmap(16, 16)))
-        controls_layout.addWidget(self.slide_opacity)
-        
-        # Assemble
-        bg_layout.addLayout(header_layout)
-        bg_layout.addWidget(self.text_edit)
-        bg_layout.addWidget(self.controls_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
-        
-        layout.addWidget(self.bg_frame)
+        # Opacity slider
+        opacity_icon = self._make_icon_label("opacity.svg")
+        self.slide_opacity = self._make_slider(20, 100, int(self.opacity_val * 100), self._set_opacity, "Opacity")
 
-    def set_html_safe(self, html):
-        """Robustly sets HTML by extracting base64 images (Unified Logic)."""
-        import re
-        import base64
-        from PyQt6.QtGui import QImage
-        from PyQt6.QtCore import QUrl
-        
+        # Separators
+        def sep():
+            s = QFrame()
+            s.setFixedSize(1, 24)
+            s.setStyleSheet(f"background: {tc['border']};")
+            return s
+
+        c_layout.addWidget(self.btn_play)
+        c_layout.addWidget(sep())
+        c_layout.addSpacing(4)
+        c_layout.addWidget(speed_icon)
+        c_layout.addWidget(self.slide_speed)
+        c_layout.addWidget(sep())
+        c_layout.addSpacing(4)
+        c_layout.addWidget(font_icon)
+        c_layout.addWidget(self.slide_font)
+        c_layout.addWidget(sep())
+        c_layout.addSpacing(4)
+        c_layout.addWidget(opacity_icon)
+        c_layout.addWidget(self.slide_opacity)
+
+        # ── Toast Overlay ──
+        self.toast_lbl = QLabel("Click-Through Enabled\nCtrl+Shift+F9 to unlock", self)
+        self.toast_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.toast_lbl.setStyleSheet(f"""
+            background: rgba(0, 0, 0, 200);
+            color: {tc['accent']};
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'Inter', 'Segoe UI Variable', sans-serif;
+            padding: 12px 20px;
+            border: 1px solid {tc['accent']};
+        """)
+        self.toast_lbl.adjustSize()
+        self.toast_lbl.hide()
+
+        # ── Assembly ──
+        inner.addWidget(header)
+        inner.addWidget(self.text_edit, 1)
+        inner.addWidget(self.controls)
+        root.addWidget(self.bg_frame)
+
+    # ── Widget Factories ─────────────────────────────────────────────
+
+    def _make_header_btn(self, icon_name, tooltip, is_dark=True, is_close=False):
+        btn = QPushButton()
+        btn.setFixedSize(28, 28)
+        btn.setIcon(get_icon(icon_name, is_dark))
+        btn.setIconSize(QSize(16, 16))
+        btn.setToolTip(tooltip)
+        tc = self.tc
+        hover = "#ef4444" if is_close else tc['border']
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background: {hover};
+            }}
+            QPushButton:checked {{
+                background: {tc['accent']};
+            }}
+        """)
+        return btn
+
+    def _make_icon_label(self, icon_name):
+        lbl = QLabel()
+        path = os.path.join(self.icon_dir, icon_name)
+        if os.path.exists(path):
+            lbl.setPixmap(QIcon(path).pixmap(32, 32))
+            lbl.setScaledContents(True)
+        lbl.setStyleSheet("background: transparent;")
+        lbl.setFixedSize(16, 16)
+        return lbl
+
+    def _make_slider(self, min_v, max_v, current, callback, tooltip):
+        tc = self.tc
+        s = QSlider(Qt.Orientation.Horizontal)
+        s.setRange(min_v, max_v)
+        s.setValue(current)
+        s.setFixedWidth(72)
+        s.setToolTip(tooltip)
+        s.valueChanged.connect(callback)
+        s.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 3px;
+                background: {tc['border']};
+                border-radius: 1px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {tc['accent']};
+                border-radius: 1px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {tc['accent']};
+                width: 12px;
+                height: 12px;
+                margin: -5px 0;
+                border-radius: 6px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {tc['text']};
+            }}
+        """)
+        return s
+
+    def _style_control_btn(self, btn):
+        tc = self.tc
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {tc['border']};
+                border: none;
+                border-radius: 8px;
+            }}
+            QPushButton:hover {{
+                background: {tc['accent']};
+            }}
+            QPushButton:checked {{
+                background: {tc['accent']};
+            }}
+        """)
+
+    def _apply_frame_style(self, locked=False):
+        tc = self.tc
+        if locked:
+            self.bg_frame.setStyleSheet(f"""
+                QFrame#HudFrame {{
+                    background: rgba(0, 0, 0, 40);
+                    border-radius: 12px;
+                    border: 1px solid rgba(255, 255, 255, 5);
+                }}
+            """)
+        else:
+            # Parse bg color and create translucent version
+            bg = QColor(tc['bg'])
+            self.bg_frame.setStyleSheet(f"""
+                QFrame#HudFrame {{
+                    background: rgba({bg.red()}, {bg.green()}, {bg.blue()}, 230);
+                    border-radius: 12px;
+                    border: 1px solid {tc['border']};
+                }}
+            """)
+
+    # ── HTML Loading ─────────────────────────────────────────────────
+
+    def _set_html_safe(self, html):
+        """Loads HTML content, extracting inline base64 images as resources."""
         pattern = r'src=["\']data:image/(?P<ext>[^;]+);base64,(?P<data>[^"\']+)["\']'
         index = 0
         doc = self.text_edit.document()
-        
-        # Strip conflicting attributes that might have leaked or were hardcoded
-        html = re.sub(r'(<img[^>]+)style=["\'][^"\']*["\']', r'\1', html)
-        html = re.sub(r'(<img[^>]+)width=["\'][^"\']*["\']', r'\1', html)
-        html = re.sub(r'(<img[^>]+)height=["\'][^"\']*["\']', r'\1', html)
-        
-        # Responsive Image CSS (Ensure it's added LAST)
-        html = html.replace("<img ", "<img style='max-width: 100%;' ")
+
+        # Preserve user-resized dimensions while ensuring responsiveness
+        html = html.replace("<img ", "<img style='max-width: 100%; height: auto;' ")
 
         def replace_match(match):
             nonlocal index
@@ -235,245 +379,196 @@ class TeleprompterDialog(QDialog):
                     doc.addResource(3, QUrl(res_name), image)
                     index += 1
                     return f'src="{res_name}"'
-            except: pass
+            except Exception:
+                pass
             return match.group(0)
 
-        processed_html = re.sub(pattern, replace_match, html)
-        self.text_edit.setHtml(processed_html)
+        processed = re.sub(pattern, replace_match, html)
+        self.text_edit.setHtml(processed)
 
-    def resizeEvent(self, event):
-        # Center toast
-        if hasattr(self, 'toast_lbl'):
-             self.toast_lbl.move(
-                (self.width() - self.toast_lbl.width()) // 2,
-                (self.height() - self.toast_lbl.height()) // 2
-            )
-        super().resizeEvent(event)
+    # ── Logic ────────────────────────────────────────────────────────
 
-    def toggle_click_through(self, checked):
-        self.is_click_through = checked
-        from src.core.stealth import StealthManager
-        
-        if checked:
-            StealthManager.set_click_through(int(self.winId()), True)
-            self.bg_frame.setStyleSheet("""
-                QFrame#HudFrame {
-                    background-color: rgba(0, 0, 0, 40);
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 255, 255, 5);
-                }
-            """)
-            self.controls_widget.hide()
-            self.title_lbl.setText("🔒 Locked")
-            self.btn_click_through.setIcon(QIcon(os.path.join(self.icon_dir, "unlock.svg")))
-            self.drag_handle.hide()
-            
-            # Show Toast
-            self.toast_lbl.show()
-            self.toast_lbl.raise_()
-            QTimer.singleShot(3000, self.toast_lbl.hide)
-            
-        else:
-            StealthManager.set_click_through(int(self.winId()), False)
-            self.bg_frame.setStyleSheet("""
-                QFrame#HudFrame {
-                    background-color: rgba(0, 0, 0, 180);
-                    border-radius: 8px;
-                    border: 1px solid rgba(255, 255, 255, 20);
-                }
-            """)
-            self.controls_widget.show()
-            self.title_lbl.setText("Teleprompter")
-            self.btn_click_through.setIcon(QIcon(os.path.join(self.icon_dir, "lock.svg")))
-            self.drag_handle.show()
-            self.btn_click_through.setChecked(False) # Ensure UI state sync
-
-    def create_slider(self, min_val, max_val, current_val, callback, icon, tooltip):
-        slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(min_val, max_val)
-        slider.setValue(current_val)
-        slider.setFixedWidth(80)
-        slider.setToolTip(tooltip)
-        slider.valueChanged.connect(callback)
-        slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #5ca0fa;
-                height: 4px;
-                background: rgba(255, 255, 255, 50);
-                margin: 0px 0;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #5ca0fa;
-                border: 1px solid #5ca0fa;
-                width: 14px;
-                height: 14px;
-                margin: -5px 0;
-                border-radius: 7px;
-            }
-        """)
-        return slider
-
-    def style_hud_button(self, btn, is_close=False):
-        hover_color = "#ff5555" if is_close else "rgba(255, 255, 255, 40)"
-        bg_color = "transparent" if is_close else "rgba(255, 255, 255, 10)"
-        border = "none" if is_close else "1px solid rgba(255, 255, 255, 20)"
-        
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {bg_color};
-                color: white;
-                border: {border};
-                border-radius: 14px; /* Circle/Round */
-            }}
-            QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:checked {{
-                background-color: #10b981;
-                border: 1px solid #10b981;
-            }}
-        """)
-
-    # --- Logic ---
-
-    # --- Logic ---
-
-    def set_speed(self, val):
+    def _set_speed(self, val):
         self.scroll_speed = val
 
-    def set_font_size(self, val):
+    def _set_font_size(self, val):
         self.font_size = val
-        
-        # 1. Update stylesheet (keeps base style correct)
+        tc = self.tc
         self.text_edit.setStyleSheet(f"""
             QTextEdit {{
                 background: transparent;
                 border: none;
-                color: white;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                color: {tc['text']};
+                font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', sans-serif;
                 font-size: {self.font_size}px;
-                line-height: 1.6;
+                padding: 16px 20px;
+                line-height: 1.8;
             }}
         """)
-        
-        # 2. Force apply to existing Rich Text content
-        # We must preserve scroll position
-        scrollbar = self.text_edit.verticalScrollBar()
-        scroll_pos = scrollbar.value()
-        
+        # Force apply to existing rich text
+        pos = self.text_edit.verticalScrollBar().value()
         cursor = self.text_edit.textCursor()
         cursor.select(QTextCursor.SelectionType.Document)
-        
         fmt = QTextCharFormat()
         fmt.setFontPointSize(self.font_size)
-        fmt.setForeground(QColor("white")) # Ensure text remains white
-        
+        fmt.setForeground(QColor(tc['text']))
         cursor.mergeCharFormat(fmt)
-        
-        # Restore cursor and scroll
         cursor.clearSelection()
         self.text_edit.setTextCursor(cursor)
-        scrollbar.setValue(scroll_pos)
+        self.text_edit.verticalScrollBar().setValue(pos)
 
-    def set_opacity(self, val):
+        # Update slider if this was called from zoom logic
+        if hasattr(self, 'slide_font') and self.slide_font.value() != val:
+            self.slide_font.blockSignals(True)
+            self.slide_font.setValue(val)
+            self.slide_font.blockSignals(False)
+        
+        logging.info(f"Teleprompter: Font size set to {val}px")
+
+    def _set_opacity(self, val):
         self.opacity_val = val / 100.0
         self.setWindowOpacity(self.opacity_val)
 
-    def toggle_play(self, checked):
+    def _toggle_play(self, checked):
+        tc = self.tc
+        is_dark = tc.get("is_dark", True)
         if checked:
-            self.btn_play.setIcon(QIcon(os.path.join(self.icon_dir, "pause.svg")))
-            self.start_scrolling()
+            self.btn_play.setIcon(get_icon("pause.svg", is_dark))
+            self.state_dot.setStyleSheet(f"color: {tc['accent']}; font-size: 8px; background: transparent;")
+            self.is_playing = True
+            self.scroll_timer.start()
         else:
             self.btn_play.setIcon(QIcon(os.path.join(self.icon_dir, "play.svg")))
-            self.stop_scrolling()
+            self.state_dot.setStyleSheet(f"color: {tc['text_muted']}; font-size: 8px; background: transparent;")
+            self.is_playing = False
+            self.scroll_timer.stop()
 
-    def toggle_click_through(self, checked):
+    def _scroll_step(self):
+        sb = self.text_edit.verticalScrollBar()
+        if sb.value() >= sb.maximum():
+            self.is_playing = False
+            self.scroll_timer.stop()
+            self.btn_play.setChecked(False)
+            return
+        sb.setValue(sb.value() + self.scroll_speed)
+
+    def _toggle_click_through(self, checked):
         self.is_click_through = checked
-        
-        # If enabled, we need to be transparent to mouse
-        # BUT we still need to capture mouse for the header controls if possible?
-        # Actually, standard WS_EX_TRANSPARENT makes the WHOLE window ignored.
-        # So we can't click "Close" or "Toggle Back" easily if we do full window click-through.
-        # Typically we use a global hotkey to toggle back.
-        
         from src.core.stealth import StealthManager
+        tc = self.tc
+
         if checked:
             StealthManager.set_click_through(int(self.winId()), True)
-            self.bg_frame.setStyleSheet("""
-                QFrame#HudFrame {
-                    background-color: rgba(0, 0, 0, 50); /* Dimmer when locked */
-                    border-radius: 15px;
-                    border: 1px solid rgba(255, 255, 255, 10);
-                }
+            self._apply_frame_style(locked=True)
+            self.controls.hide()
+            self.title_lbl.setText("LOCKED")
+            self.title_lbl.setStyleSheet(f"""
+                color: {tc['accent']};
+                font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+                font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+                background: transparent;
             """)
-            self.controls_widget.hide() # Hide controls when locked
-            self.title_lbl.setText("🔒 Locked (Ctrl+Shift+F9 to unlock)")
+            self.btn_lock.setIcon(QIcon(os.path.join(self.icon_dir, "unlock.svg")))
+            self.drag_handle.hide()
+            # Toast
+            self.toast_lbl.show()
+            self.toast_lbl.raise_()
+            QTimer.singleShot(2500, self.toast_lbl.hide)
         else:
             StealthManager.set_click_through(int(self.winId()), False)
-            self.bg_frame.setStyleSheet("""
-                QFrame#HudFrame {
-                    background-color: rgba(0, 0, 0, 180);
-                    border-radius: 15px;
-                    border: 1px solid rgba(255, 255, 255, 30);
-                }
+            self._apply_frame_style(locked=False)
+            self.controls.show()
+            self.title_lbl.setText("TELEPROMPTER")
+            self.title_lbl.setStyleSheet(f"""
+                color: {tc['text_muted']};
+                font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', sans-serif;
+                font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+                background: transparent;
             """)
-            self.controls_widget.show()
-            self.title_lbl.setText("📜 Teleprompter")
+            self.btn_lock.setIcon(QIcon(os.path.join(self.icon_dir, "lock.svg")))
+            self.drag_handle.show()
+            self.btn_lock.setChecked(False)
 
-    def start_scrolling(self):
-        self.is_playing = True
-        self.scroll_timer.start()
+    def wheelEvent(self, event):
+        """Ctrl+Scroll = zoom font size."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._zoom_in()
+            elif delta < 0:
+                self._zoom_out()
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
-    def stop_scrolling(self):
-        self.is_playing = False
-        self.scroll_timer.stop()
+    def keyPressEvent(self, event):
+        """Handle Ctrl+Plus, Ctrl+Minus, Ctrl+0 for zoom."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+                self._zoom_in()
+                return
+            elif event.key() == Qt.Key.Key_Minus:
+                self._zoom_out()
+                return
+            elif event.key() == Qt.Key.Key_0:
+                self._set_font_size(24) # Default
+                return
+        super().keyPressEvent(event)
 
-    def scroll_text(self):
-        scrollbar = self.text_edit.verticalScrollBar()
-        current_val = scrollbar.value()
-        max_val = scrollbar.maximum()
-        if current_val >= max_val:
-            self.stop_scrolling()
-            self.btn_play.setChecked(False)
-            self.btn_play.setIcon(QIcon(os.path.join(self.icon_dir, "play.svg")))
-            return
-        scrollbar.setValue(current_val + self.scroll_speed)
+    def _zoom_in(self):
+        new_size = min(72, self.font_size + 2)
+        if new_size != self.font_size:
+            self._set_font_size(new_size)
 
-    # --- Auto-Hide Controls ---
-    def enterEvent(self, event):
-        if not self.is_click_through:
-            self.controls_widget.show()
-            self.btn_close.show()
-            self.btn_click_through.show()
-        super().enterEvent(event)
+    def _zoom_out(self):
+        new_size = max(12, self.font_size - 2)
+        if new_size != self.font_size:
+            self._set_font_size(new_size)
 
-    def leaveEvent(self, event):
-        if self.is_playing and not self.is_click_through:
-             # Look minimal when playing and mouse leaves
-             self.controls_widget.hide()
-             self.btn_close.hide()
-             self.btn_click_through.hide()
-        super().leaveEvent(event)
+    # ── Window Drag ──────────────────────────────────────────────────
 
-    # --- Window Dragging Logic ---
-    def setup_drag_behavior(self):
+    def _setup_drag(self):
         self._drag_active = False
         self._drag_pos = None
 
     def mousePressEvent(self, event):
-        if self.is_click_through: return 
+        if self.is_click_through:
+            return
         if event.button() == Qt.MouseButton.LeftButton:
-            # Only drag if not clicking a control
             self._drag_active = True
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if self.is_click_through: return
+        if self.is_click_through:
+            return
         if self._drag_active and event.buttons() == Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_active = False
+
+    # ── Auto-hide controls while playing ─────────────────────────────
+
+    def enterEvent(self, event):
+        if not self.is_click_through:
+            self.controls.show()
+            self.btn_close.show()
+            self.btn_lock.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.is_playing and not self.is_click_through:
+            self.controls.hide()
+            self.btn_close.hide()
+            self.btn_lock.hide()
+        super().leaveEvent(event)
+
+    def resizeEvent(self, event):
+        if hasattr(self, 'toast_lbl'):
+            self.toast_lbl.move(
+                (self.width() - self.toast_lbl.width()) // 2,
+                (self.height() - self.toast_lbl.height()) // 2
+            )
+        super().resizeEvent(event)

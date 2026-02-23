@@ -57,23 +57,21 @@ class VisibilityManager:
 
     def toggle_visibility(self):
         """Hide or show the entire application (including floating docks)."""
-        from src.features.browser.browser_pane import BrowserPane
-
         if self.mw.isVisible():
             # Capture state BEFORE hiding
             all_docks = self.mw.findChildren(QDockWidget)
-            all_browsers = self.mw.findChildren(BrowserPane)
-
             self.mw.hide()
             for dock in all_docks:
-                if dock.isFloating() and dock.isVisible():
-                    dock.hide()
-                    dock.setProperty("was_floating_visible", True)
-            # Mark browsers that were visible so we can restore them
-            for browser in all_browsers:
-                if browser.isVisible():
-                    browser.setProperty("was_visible", True)
-                    browser.hide()
+                try:
+                    # Mark ONLY docks that are actually visible right now
+                    if dock.isVisible():
+                        dock.setProperty("was_visible_before_hide", True)
+                        # Floating docks must be hidden manually since they are top-level windows
+                        if dock.isFloating():
+                            dock.hide()
+                    else:
+                        dock.setProperty("was_visible_before_hide", False)
+                except RuntimeError: continue
         else:
             self.mw.show()
             self.mw.activateWindow()
@@ -81,22 +79,13 @@ class VisibilityManager:
 
             def restore_docks():
                 all_docks = self.mw.findChildren(QDockWidget)
-                all_browsers = self.mw.findChildren(BrowserPane)
                 for dock in all_docks:
                     try:
-                        if dock.property("was_floating_visible") or \
-                           (not dock.isFloating() and not dock.isVisible()):
+                        # Restore ONLY what was visible before
+                        if dock.property("was_visible_before_hide"):
                             dock.show()
-                            dock.setProperty("was_floating_visible", False)
-                    except RuntimeError:
-                        continue
-                # Restore browsers that were visible before hiding
-                for browser in all_browsers:
-                    try:
-                        if browser.property("was_visible"):
-                            browser.show()
-                            browser.setProperty("was_visible", False)
-                    except RuntimeError:
+                            dock.setProperty("was_visible_before_hide", False)
+                    except (RuntimeError, AttributeError):
                         continue
                 self.mw.menuBar().raise_()
                 self.mw.update()
@@ -115,7 +104,7 @@ class VisibilityManager:
         """Priority: toggle Teleprompter's ghost click if open, else main window."""
         if hasattr(self.mw, 'teleprompter') and self.mw.teleprompter and \
            self.mw.teleprompter.isVisible():
-            self.mw.teleprompter.btn_click_through.click()
+            self.mw.teleprompter.btn_lock.click()
             return
         ghost_click_act = self.mw.menu_manager.actions.get("ghost_click")
         if ghost_click_act:

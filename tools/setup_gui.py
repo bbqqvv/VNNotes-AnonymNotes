@@ -112,7 +112,7 @@ SOFTWARE."""
         f = tk.Frame(self.container, bg="#f8f9fa")
         ttk.Label(f, text="Welcome to VNNotes Setup", style="Header.TLabel").pack(anchor="w", pady=(0, 20))
         
-        desc = "VNNotes is the ultimate stealth partner for high-stakes Meetings and Interviews. This setup wizard will guide you through the official installation process of VNNotes v1.1.1 Stable.\n\nKey Power Features:\n• Phantom Invisibility (Anti-Capture Tech)\n• Meeting Master Teleprompting\n• Multi-Document Workspace System\n• Integrated Ultra-Hub (Browser & Clipboard)\n• 100% Standalone Private Vault"
+        desc = "VNNotes is the ultimate stealth partner for high-stakes Meetings and Interviews. This setup wizard will guide you through the official installation process of VNNotes v2.0.0 Stable.\n\nKey Power Features:\n• Phantom Invisibility (Anti-Capture Tech)\n• Meeting Master Teleprompting\n• Multi-Document Workspace System\n• Integrated Ultra-Hub (Browser & Clipboard)\n• 100% Standalone Private Vault"
         tk.Label(f, text=desc, bg="#f8f9fa", wraplength=400, justify="left", font=("Segoe UI", 10)).pack(anchor="w")
         
         tk.Label(f, text="\nClick 'Next' to proceed with the installation.", bg="#f8f9fa", font=("Segoe UI", 10, "italic")).pack(anchor="w")
@@ -250,7 +250,7 @@ SOFTWARE."""
 
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
                 winreg.SetValueEx(key, "DisplayName",        0, winreg.REG_SZ, "VNNotes")
-                winreg.SetValueEx(key, "DisplayVersion",     0, winreg.REG_SZ, "1.1.1")
+                winreg.SetValueEx(key, "DisplayVersion",     0, winreg.REG_SZ, "2.0.0")
                 winreg.SetValueEx(key, "Publisher",          0, winreg.REG_SZ, "VTech Digital Solution")
                 winreg.SetValueEx(key, "InstallLocation",    0, winreg.REG_SZ, install_dir)
                 winreg.SetValueEx(key, "DisplayIcon",        0, winreg.REG_SZ, exe_path)
@@ -260,8 +260,38 @@ SOFTWARE."""
         except Exception as e:
             print(f"Registry write warning: {e}")
 
+    def _check_and_close_app(self):
+        """Check if VNNotes.exe is running and ask user to close it."""
+        try:
+            import subprocess
+            # Use tasklist to find the process
+            output = subprocess.check_output('tasklist /FI "IMAGENAME eq VNNotes.exe"', shell=True).decode('utf-8', errors='ignore')
+            if "VNNotes.exe" in output:
+                res = messagebox.askretrycancel(
+                    "App Running", 
+                    "VNNotes is currently running. Please close it before continuing with the installation.\n\nClick 'Retry' once closed or 'Cancel' to abort."
+                )
+                if res: # Retry
+                    return self._check_and_close_app()
+                else: # Cancel
+                    return False
+            return True
+        except Exception:
+            return True # Fallback if tasklist fails
+
+    def start_install(self):
+        self.install_dir = self.path_entry.get()
+        self.show_frame("Installing")
+        import threading
+        threading.Thread(target=self.run_install, daemon=True).start()
+
     def run_install(self):
         try:
+            # ── Step 0: Ensure app is closed ───────────────────────────────────
+            if not self._check_and_close_app():
+                self.destroy()
+                return
+
             # ── Step 1: Detect & cleanly remove previous installation ──────────
             old_dir = self._get_registry_install_dir()
             if old_dir and os.path.exists(old_dir) and old_dir != self.install_dir:
@@ -342,7 +372,7 @@ SOFTWARE."""
                     ps = propsys.SHGetPropertyStoreFromParsingName(path, None, propsys.GPS_READWRITE)
                     pk = pscon.PKEY_AppUserModel_ID
                     # Define the exact same ID as in main.py
-                    MY_APP_ID = 'vtech.vnnotes.stable.v1'
+                    MY_APP_ID = 'vtech.vnnotes.stable.v2'
                     pv = propsys.PROPVARIANTType(MY_APP_ID)
                     ps.SetValue(pk, pv)
                     ps.Commit()

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://stealthassist.vercel.app"),
+  metadataBase: new URL("https://vnnotes.vercel.app"),
   title: "VNNotes - The Invisible Workspace",
   description: "Privacy-focused note-taking and browsing tool for professionals. Invisible to screen sharing, local storage only.",
   icons: {
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
     title: "VNNotes - The Invisible Workspace",
     description: "Privacy-focused note-taking and browsing tool for professionals.",
-    url: "https://stealthassist.vercel.app",
+    url: "https://vnnotes.vercel.app",
     siteName: "VNNotes",
     images: [
       {

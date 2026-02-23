@@ -1,23 +1,97 @@
 import os
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QMainWindow, QDockWidget
+from PyQt6.QtGui import QIcon, QPalette, QColor
+from PyQt6.QtWidgets import QMainWindow, QDockWidget, QApplication
 
 class ThemeManager:
     """
     Manages application theme, stylesheets, and icons.
     Separates UI styling logic from MainWindow.
     """
+    
+    THEME_CONFIG = {
+        "zinc": {  # Premium Dark
+            "bg": "#09090b", "surface": "#18181b", "border": "#27272a", 
+            "text": "#f4f4f5", "text_muted": "#a1a1aa", "accent": "#3b82f6",
+            "selection": "#27272a", "hover": "#18181b", "is_dark": True
+        },
+        "nord": { # Arctic Blue
+            "bg": "#2e3440", "surface": "#3b4252", "border": "#434c5e",
+            "text": "#eceff4", "text_muted": "#d8dee9", "accent": "#88c0d0",
+            "selection": "#4c566a", "hover": "#3b4252", "is_dark": True
+        },
+        "midnight": { # Deep Navy
+            "bg": "#020617", "surface": "#0f172a", "border": "#1e293b",
+            "text": "#f1f5f9", "text_muted": "#94a3b8", "accent": "#38bdf8",
+            "selection": "#1e293b", "hover": "#0f172a", "is_dark": True
+        },
+        "solarized": { # Classic Solarized Dark
+            "bg": "#002b36", "surface": "#073642", "border": "#586e75",
+            "text": "#839496", "text_muted": "#586e75", "accent": "#268bd2",
+            "selection": "#073642", "hover": "#073642", "is_dark": True
+        },
+        "slate": { # Premium Light
+            "bg": "#f8fafc", "surface": "#ffffff", "border": "#e2e8f0",
+            "text": "#0f172a", "text_muted": "#64748b", "accent": "#2563eb",
+            "selection": "#eff6ff", "hover": "#f1f5f9", "is_dark": False
+        },
+        "sepia": { # Reading Mode
+            "bg": "#fdf6e3", "surface": "#eee8d5", "border": "#d33682",
+            "text": "#586e75", "text_muted": "#93a1a1", "accent": "#b58900",
+            "selection": "#eee8d5", "hover": "#eee8d5", "is_dark": False
+        },
+        "dracula": { # Iconic Purple
+            "bg": "#282a36", "surface": "#44475a", "border": "#6272a4",
+            "text": "#f8f8f2", "text_muted": "#6272a4", "accent": "#bd93f9",
+            "selection": "#44475a", "hover": "#44475a", "is_dark": True
+        },
+        "everforest": { # Organic Green
+            "bg": "#2d353b", "surface": "#3d484d", "border": "#475258",
+            "text": "#d3c6aa", "text_muted": "#859289", "accent": "#a7c080",
+            "selection": "#3d484d", "hover": "#3d484d", "is_dark": True
+        },
+        "rose_pine": { # Elegant Serene
+            "bg": "#191724", "surface": "#1f1d2e", "border": "#26233a",
+            "text": "#e0def4", "text_muted": "#908caa", "accent": "#ebbcba",
+            "selection": "#2a2837", "hover": "#1f1d2e", "is_dark": True
+        },
+        "gruvbox": { # Retro Comfort
+            "bg": "#282828", "surface": "#3c3836", "border": "#504945",
+            "text": "#ebdbb2", "text_muted": "#928374", "accent": "#fabd2f",
+            "selection": "#3c3836", "hover": "#3c3836", "is_dark": True
+        }
+    }
+
     def __init__(self, main_window, config_manager, base_path):
         self.main_window = main_window
         self.config = config_manager
         self.base_path = base_path
-        self.current_theme = self.config.get_value("app/theme", "dark")
+        
+        # Initial theme selection
+        saved_theme = self.config.get_value("app/theme")
+        if not saved_theme:
+            # First run: Detect system theme
+            self.current_theme = "zinc" if self._is_system_dark() else "slate"
+        else:
+            self.current_theme = saved_theme
+            
+        # Legacy migration
+        if self.current_theme == "dark": self.current_theme = "zinc"
+        if self.current_theme == "light": self.current_theme = "slate"
+
+    @property
+    def is_dark_mode(self):
+        """Returns True if current theme is a dark theme."""
+        return self.THEME_CONFIG.get(self.current_theme, {}).get("is_dark", True)
+
+    def get_theme_palette(self):
+        """Returns the color config dictionary for the current theme."""
+        return self.THEME_CONFIG.get(self.current_theme, self.THEME_CONFIG["zinc"])
 
     def apply_theme(self, mode=None):
         """Applies the specified theme mode ('dark' or 'light')."""
         if mode:
             self.current_theme = mode
-        
+            
         self.config.set_value("app/theme", self.current_theme)
         
         # Update Branding if available
@@ -25,210 +99,388 @@ class ThemeManager:
             self.main_window.branding.update()
             
         # Get path for close icon to use in CSS
-        folder = "dark_theme" if self.current_theme == "dark" else "light_theme"
+        # Map current theme to dark/light icons
+        is_dark = self.THEME_CONFIG.get(self.current_theme, {}).get("is_dark", True)
+        folder = "dark_theme" if is_dark else "light_theme"
         close_icon_url = os.path.join(self.base_path, "assets", "icons", folder, "close.svg").replace("\\", "/")
+        top_icon_url = os.path.join(self.base_path, "assets", "icons", folder, "top.svg").replace("\\", "/")
+        right_icon_url = os.path.join(self.base_path, "assets", "icons", folder, "chevron-right.svg").replace("\\", "/")
 
-        style = self._generate_stylesheet(self.current_theme, close_icon_url)
+        try:
+            style = self._generate_stylesheet(self.current_theme, close_icon_url, top_icon_url, right_icon_url)
+        except Exception:
+            # Emergency fallback: apply zinc (Dark) if generation fails
+            self.current_theme = "zinc"
+            style = self._generate_stylesheet("zinc", close_icon_url, top_icon_url, right_icon_url)
+            
         self.main_window.setStyleSheet(style)
+        
+        # Apply globally to ensure all dialogs and popups are themed
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(style)
         
         # Update Sidebar Icons
         if hasattr(self.main_window, 'sidebar'):
              self.main_window.sidebar.update_toolbar_icons()
              self.main_window.sidebar.refresh_tree()
         
-        # Update icons in other managers if needed
         if hasattr(self.main_window, 'menu_manager'):
              self.main_window.menu_manager.update_icons()
 
+        if hasattr(self.main_window, 'find_manager'):
+             self.main_window.find_manager._apply_theme()
+
+        theme_config = self.THEME_CONFIG.get(self.current_theme, self.THEME_CONFIG["zinc"])
+        self._sync_application_palette(theme_config)
+
+
+    def _sync_application_palette(self, c):
+        """Synchronizes the application's global palette with the theme for native contrast."""
+        app = QApplication.instance()
+        if not app: return
+        
+        p = app.palette()
+        bg = QColor(c['bg'])
+        text = QColor(c['text'])
+        surface = QColor(c['surface'])
+        
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Window, bg)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.WindowText, text)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Base, bg)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Text, text)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Button, surface)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.ButtonText, text)
+        p.setColor(QPalette.ColorGroup.All, QPalette.ColorRole.Highlight, QColor(c['accent']))
+        
+        app.setPalette(p)
+
     def toggle_theme(self):
-        """Switches between dark and light themes."""
-        new_theme = "light" if self.current_theme == "dark" else "dark"
+        """Cycles through all available themes in THEME_CONFIG sequentially."""
+        keys = list(self.THEME_CONFIG.keys())
+        try:
+            current_index = keys.index(self.current_theme)
+            next_index = (current_index + 1) % len(keys)
+        except ValueError:
+            next_index = 0
+            
+        new_theme = keys[next_index]
         self.apply_theme(new_theme)
         return new_theme
 
-    def get_icon(self, filename):
-        """Retrieves a QIcon based on the current theme."""
-        folder = "dark_theme" if self.current_theme == "dark" else "light_theme"
-        path = os.path.join(self.base_path, "assets", "icons", folder, filename)
-        return QIcon(path) if os.path.exists(path) else QIcon()
+    def _is_system_dark(self):
+        """Detects if Windows is in dark mode (Registry check)."""
+        try:
+            import winreg
+            registry = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+            key = winreg.OpenKey(registry, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return value == 0 # 0 means Dark, 1 means Light
+        except Exception:
+            return True # Default to Dark if detection fails or not on Windows
 
-    def _generate_stylesheet(self, mode, close_icon_url):
-        """Generates the CSS string."""
-        if mode == "dark":
-            return f"""
-                QMainWindow, QDockWidget {{ background: #2b2b2b; color: #eeeeee; }}
-                QTextEdit, NotePane {{ background: #333333; color: #eeeeee; border: none; font-family: 'Segoe UI', sans-serif; font-size: 13px; padding: 6px; }}
-                QToolBar {{ background: #1e1e1e; border-bottom: 1px solid #333; spacing: 4px; padding: 2px; min-height: 26px; }}
-                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #eeeeee; }}
-                QToolButton:hover {{ background: #3a3a3a; }}
-                QMenuBar {{ background: #1e1e1e; color: #eeeeee; border-bottom: 1px solid #333; padding: 2px; }}
-                QMenuBar::item {{ padding: 4px 8px; }}
-                QMenuBar::item:selected {{ background: #3a3a3a; }}
-                QMenu {{ background: #2b2b2b; color: #eeeeee; padding: 4px; border: 1px solid #444; }}
-                QMenu::item:selected {{ background: #3c3c3c; }}
-                QStatusBar {{ background: #2b2b2b; color: #eeeeee; border-top: 1px solid #444; min-height: 18px; }}
-                QStatusBar QLabel {{ color: #eeeeee; font-size: 11px; padding: 0px 4px; }}
-                
-                /* Sidebar */
-                QTreeWidget {{ background: #2b2b2b; color: #eeeeee; border: none; }}
-                QTreeWidget::item {{ padding: 6px; border-radius: 4px; margin: 1px 4px; }}
-                QTreeWidget::item:hover {{ background: #3a3a3a; }}
-                QTreeWidget::item:selected {{ background: #444444; color: #ffffff; }}
-                #SidebarHeader {{ background: #1e1e1e; border-bottom: 1px solid #333; }}
-                #SidebarTitle {{ color: #bbbbbb; letter-spacing: 1px; }}
-                
-                #SidebarSearch {{ 
-                    background: #2d2d2d; 
-                    color: #ddd; 
-                    border: 1px solid #333; 
-                    border-radius: 4px; 
-                    padding: 4px; 
-                    margin: 5px; 
-                }}
-                #SidebarSearch:focus {{ border: 1px solid #555; }}
-                
-                /* Clipboard & Lists */
-                #ClipboardList {{ background: transparent; border: none; }}
-                #ClipboardList::item {{ 
-                    padding: 8px; 
-                    border-bottom: 1px solid #333; 
-                    color: #ccc;
-                }}
-                #ClipboardList::item:hover {{ background: #3a3a3a; color: #fff; }}
-                #ClipboardList::item:selected {{ background: #444444; color: #fff; }}
-                
-                QTabBar {{
-                    background: #1e1e1e;
-                    border-bottom: 1px solid #333;
-                }}
-                QTabBar::tab {{
-                    background: #252525;
-                    color: #888888;
-                    padding: 2px 16px 2px 8px; /* Hyper-compact */
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                    margin-right: 1px;
-                    min-width: 50px;
-                    font-size: 11px;
-                    border: 1px solid transparent;
-                }}
-                QTabBar::tab:selected {{
-                    background: #333333;
-                    color: #eeeeee;
-                    border-bottom: 2px solid #3498db;
-                }}
-                QTabBar::tab:hover {{
-                    background: #2a2a2a;
-                    color: #cccccc;
-                }}
-                
-                QTabBar::close-button {{
-                    image: url("{close_icon_url}");
-                    subcontrol-position: right;
-                    margin-right: 2px;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 6px;
-                    background: transparent;
-                }}
-                QTabBar::close-button:hover {{
-                    background-color: #ff5f56;
-                }}
-            """
+    def get_icon(self, filename):
+        """Retrieves a QIcon based on theme brightness, with fallback to root icons."""
+        is_dark = self.THEME_CONFIG.get(self.current_theme, {}).get("is_dark", True)
+        folder = "dark_theme" if is_dark else "light_theme"
+        
+        # 1. Try themed folder
+        path = os.path.join(self.base_path, "assets", "icons", folder, filename)
+        if os.path.exists(path):
+            return QIcon(path)
+            
+        # 2. Fallback to root icons folder
+        root_path = os.path.join(self.base_path, "assets", "icons", filename)
+        return QIcon(root_path) if os.path.exists(root_path) else QIcon()
+
+    def _generate_stylesheet(self, theme_name, close_icon_url, top_icon_url, right_icon_url):
+        """Generates simpler dynamic CSS from THEME_CONFIG."""
+        c = self.THEME_CONFIG.get(theme_name, self.THEME_CONFIG["zinc"])
+        
+        # Determine Menu Selection Colors (High Contrast Logic)
+        if c.get("is_dark", True):
+            # Dark: Solid blue background, white text/icons
+            menu_sel_bg = c['accent']
+            menu_sel_text = "#ffffff"
         else:
-            return f"""
-                QMainWindow, QDockWidget {{ background: #f9fafb; color: #1f2937; }}
-                QTextEdit, NotePane {{ 
-                    background: #ffffff; 
-                    color: #1f2937; 
-                    border: 1px solid #e2e8f0; 
-                    border-radius: 4px;
-                    font-family: 'Segoe UI', sans-serif; 
-                    font-size: 13px; 
-                    padding: 6px; 
-                }}
-                QToolBar {{ background: #ffffff; border-bottom: 1px solid #e2e8f0; spacing: 4px; padding: 2px; min-height: 26px; }}
-                QToolButton {{ background: transparent; border-radius: 4px; padding: 2px; color: #4b5563; }}
-                QToolButton:hover {{ background: #f3f4f6; color: #111827; }}
-                
-                QMenuBar {{ background: #ffffff; color: #1f2937; border-bottom: 1px solid #e2e8f0; padding: 2px; }}
-                QMenuBar::item {{ padding: 4px 8px; border-radius: 4px; }}
-                QMenuBar::item:selected {{ background: #f3f4f6; }}
-                
-                QMenu {{ background: #ffffff; color: #1f2937; padding: 4px; border: 1px solid #e2e8f0; border-radius: 6px; }}
-                QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; }}
-                QMenu::item:selected {{ background: #eff6ff; color: #2563eb; }}
-                
-                QStatusBar {{ background: #ffffff; color: #6b7280; border-top: 1px solid #e2e8f0; min-height: 18px; }}
-                QStatusBar QLabel {{ font-size: 11px; padding: 0px 4px; }}
-                
-                /* Sidebar - Compact Synchronization */
-                QTreeWidget {{ background: #f9fafb; color: #374151; border: none; border-right: 1px solid #e2e8f0; }}
-                QTreeWidget::item {{ padding: 6px; border-radius: 4px; margin: 1px 4px; }}
-                QTreeWidget::item:hover {{ background: #f3f4f6; }}
-                QTreeWidget::item:selected {{ background: #eff6ff; color: #1d4ed8; font-weight: bold; }}
-                
-                #SidebarHeader {{ background: #f9fafb; border-bottom: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; }}
-                #SidebarTitle {{ color: #6b7280; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; font-size: 10px; }}
-                
-                #SidebarSearch {{ 
-                    background: #ffffff; 
-                    color: #1f2937; 
-                    border: 1px solid #e2e8f0; 
-                    border-radius: 4px; 
-                    padding: 4px; 
-                    margin: 5px; 
-                }}
-                #SidebarSearch:focus {{ border: 1px solid #2563eb; }}
-                
-                /* Clipboard & Lists */
-                #ClipboardList {{ background: transparent; border: none; }}
-                #ClipboardList::item {{ 
-                    padding: 8px; 
-                    border-bottom: 1px solid #e2e8f0; 
-                    color: #374151;
-                }}
-                #ClipboardList::item:hover {{ background: #f3f4f6; color: #111827; }}
-                #ClipboardList::item:selected {{ background: #eff6ff; color: #1d4ed8; }}
-                
-                /* Modern Compact Tab Bar */
-                QTabBar {{
-                    background: #f1f5f9;
-                    border-bottom: 1px solid #e2e8f0;
-                }}
-                QTabBar::tab {{
-                    background: #e2e8f0;
-                    color: #64748b;
-                    padding: 2px 16px 2px 8px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
-                    margin-right: 1px;
-                    min-width: 50px;
-                    font-size: 11px;
-                    border: 1px solid #cbd5e1;
-                    border-bottom: none;
-                }}
-                QTabBar::tab:selected {{
-                    background: #ffffff;
-                    color: #1e293b;
-                    border: 1px solid #e2e8f0;
-                    border-bottom: 2px solid #2563eb;
-                }}
-                QTabBar::tab:hover:!selected {{
-                    background: #f8fafc;
-                    color: #475569;
-                }}
-                
-                QTabBar::close-button {{
-                    image: url("{close_icon_url}");
-                    subcontrol-position: right;
-                    margin-right: 2px;
-                    width: 12px;
-                    height: 12px;
-                    border-radius: 6px;
-                    background: transparent;
-                }}
-                QTabBar::close-button:hover {{
-                    background-color: #fee2e2;
-                }}
-            """
+            # Light: Pale blue/grey background, keeps dark icons visible
+            # We use 'selection' color or a fallback soft blue
+            menu_sel_bg = c.get('selection', '#eff6ff')
+            menu_sel_text = c['accent'] # Accent color for text contrast
+        
+        return f"""
+            QMainWindow {{
+                background-color: {c['bg']};
+                color: {c['text']};
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+            }}
+            
+            QDockWidget {{
+                background-color: {c['bg']};
+                color: {c['text']};
+                border: none;
+            }}
+            
+            /* Central Widget Container */
+            #CentralWidget, BrandingOverlay {{
+                background-color: {c['bg']};
+            }}
+            
+            QMainWindow::separator {{
+                background-color: {c['border']};
+                width: 1px;
+                height: 1px;
+            }}
+
+            
+            QLineEdit {{ 
+                background: {c['bg']}; 
+                color: {c['text']}; 
+                border: 1px solid {c['border']}; 
+                padding: 4px 8px;
+                border-radius: 6px; 
+                selection-background-color: {c['accent']};
+            }}
+            
+            QLineEdit:focus {{
+                border-color: {c['accent']};
+            }}
+            
+            QLineEdit#SidebarSearch {{
+                margin: 2px 4px;
+            }}
+            
+            QTextEdit, NotePane {{ 
+                background: {c['bg']}; 
+                color: {c['text']}; 
+                border: 1px solid {c['border']}; 
+                border-radius: 4px;
+                font-family: 'Segoe UI', 'Inter', sans-serif; 
+                padding: 4px;
+                selection-background-color: {c['accent']};
+            }}
+
+            QToolBar {{ 
+                background: {c['surface']}; 
+                border-bottom: 1px solid {c['border']}; 
+                padding: 0px;
+                spacing: 0px;
+            }}
+            QToolBar QToolButton {{ 
+                background: transparent; 
+                border: none;
+                border-radius: 4px; 
+                padding: 4px; 
+                margin: 0 4px;
+                min-width: 28px;
+                min-height: 28px;
+            }}
+            QToolBar QToolButton:hover {{
+                background: {c['hover']};
+            }}
+            
+            QMenuBar::item {{ 
+                padding: 4px 10px; 
+                background: transparent; 
+                border-radius: 4px;
+                margin: 2px 2px;
+            }}
+            QMenuBar::item:selected {{ 
+                background: {c['hover']}; 
+            }}
+            
+            QMenu {{ 
+                background: {c['surface']}; 
+                color: {c['text']}; 
+                border: 1px solid {c['border']}; 
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 6px 32px 6px 32px; /* Extra room for icons/arrows */
+                border-radius: 5px;
+                margin: 1px 4px;
+            }}
+            QMenu::item:selected {{ 
+                background: {menu_sel_bg}; 
+                color: {menu_sel_text}; 
+            }}
+            QMenu::icon {{
+                padding-left: 10px;
+            }}
+            QMenu::right-arrow {{
+                image: url("{right_icon_url}");
+                padding-right: 8px;
+                width: 14px;
+                height: 14px;
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {c['border']};
+                margin: 4px 10px;
+            }}
+            
+            QStatusBar {{ 
+                background: {c['surface']}; 
+                color: {c['text_muted']}; 
+                border-top: 1px solid {c['border']}; 
+            }}
+            QStatusBar QLabel {{ 
+                color: {c['text_muted']}; 
+            }}
+            
+            QTreeWidget {{ 
+                background: {c['bg']}; 
+                color: {c['text_muted']}; 
+                border: none;
+                font-size: 9pt;
+            }}
+            QTreeWidget::item {{
+                padding: 3px 6px;
+                border-radius: 4px;
+                margin: 1px 0px;
+            }}
+            QTreeWidget::item:hover {{ 
+                background: {c['hover']}; 
+            }}
+            QTreeWidget::item:selected {{ 
+                background: {menu_sel_bg}; 
+                color: {menu_sel_text}; 
+            }}
+            
+            /* High Contrast Dialog Inputs */
+            QInputDialog, QDialog {{
+                background: {c['bg']};
+                color: {c['text']};
+            }}
+            QLineEdit, QSpinBox, QDoubleSpinBox {{
+                background: {c['surface']};
+                color: {c['text']};
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QComboBox {{
+                background: {c['surface']};
+                color: {c['text']};
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+                padding: 2px 4px;
+            }}
+            QToolBar QComboBox {{
+                background: transparent;
+                border: 1px solid transparent;
+            }}
+            QToolBar QComboBox:hover {{
+                background: {c['hover']};
+                border: 1px solid {c['border']};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 14px;
+                border-left-width: 0px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {c['surface']};
+                color: {c['text']};
+                selection-background-color: {c['accent']};
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+            }}
+            QComboBox QLineEdit {{
+                color: {c['text']};
+                background: transparent;
+                padding-left: 4px;
+            }}
+            QLabel {{
+                color: {c['text']};
+            }}
+            
+            #SidebarHeader {{ 
+                background: {c['surface']}; 
+                border-bottom: 1px solid {c['border']}; 
+                padding: 6px 0;
+            }}
+            
+            /* Tabs */
+            QTabBar::tab {{
+                background-color: {c['bg']}; 
+                color: {c['text_muted']}; 
+                padding: 2px 10px; 
+                border: 1px solid {c['border']};
+                border-bottom: none;
+                border-top-left-radius: 2px;
+                border-top-right-radius: 2px;
+                margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {c['surface']};
+                color: {c['text']};
+            }}
+            
+            /* Tab bar overflow scroll buttons */
+            QTabBar QToolButton {{
+                background: {c['surface']};
+                border: 1px solid {c['border']};
+                border-radius: 2px;
+                padding: 2px;
+                margin: 1px;
+            }}
+            QTabBar QToolButton:hover {{
+                background: {c['hover']};
+            }}
+            
+            QTabWidget::pane {{
+                border: none;
+                background-color: {c['bg']};
+            }}
+            
+            QTabBar::close-button {{
+                image: url("{close_icon_url}");
+                subcontrol-position: right;
+            }}
+            
+            QScrollBar:vertical {{
+                background: {c['bg']};
+                width: 12px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c['border']};
+                min-height: 20px;
+                border: 1px solid {c['border']};
+                border-radius: 6px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {c['text_muted']};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+
+            QScrollBar:horizontal {{
+                background: {c['bg']};
+                height: 12px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {c['border']};
+                min-width: 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {c['text_muted']};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
+            QToolTip {{
+                background-color: {c['surface']};
+                color: {c['text']};
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+        """
+

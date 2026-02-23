@@ -1,7 +1,10 @@
+import os
+import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QLineEdit, QMenu, QToolButton)
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtCore import QUrl, Qt
+from PyQt6.QtCore import QUrl, Qt, pyqtSignal
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEnginePage
 
 class StealthWebView(QWebEngineView):
     def contextMenuEvent(self, event):
@@ -23,9 +26,14 @@ class StealthWebView(QWebEngineView):
         first_action = menu.actions()[0] if menu.actions() else None
         
         # --- Add items to TOP of menu ---
-        import os
+        # Determine icon folder based on theme brightness
+        is_dark = True
+        if hasattr(main_window, 'theme_manager'):
+            is_dark = main_window.theme_manager.is_dark_mode
+        
+        icon_folder = "dark_theme" if is_dark else "light_theme"
         base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        icon_dir = os.path.join(base_path, "assets", "icons", "dark_theme") # Assuming dark theme for now or generic
+        icon_dir = os.path.join(base_path, "assets", "icons", icon_folder)
         
         # 1. Ask AI Action (Perplexity)
         ai_act = QAction(f"✨ Ask AI '{display_text}'", self)
@@ -108,18 +116,17 @@ class BrowserPane(QWidget):
 
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
         
         # Toolbar Container (QWidget instead of QToolBar to prevent floating issues)
         self.toolbar_container = QWidget()
         self.toolbar_container.setObjectName("BrowserToolbar")
         self.toolbar_container.setFixedHeight(36)
-        self.toolbar_container.setStyleSheet("#BrowserToolbar { background: #222; border-bottom: 1px solid #444; }")
         self.toolbar_layout = QHBoxLayout(self.toolbar_container)
         self.toolbar_layout.setContentsMargins(5, 2, 5, 2)
         self.toolbar_layout.setSpacing(5)
-        layout.addWidget(self.toolbar_container)
+        self.layout.addWidget(self.toolbar_container)
 
         # Web View
         self.browser = StealthWebView()
@@ -133,10 +140,6 @@ class BrowserPane(QWidget):
             btn = QToolButton()
             btn.setText(text)
             btn.clicked.connect(slot)
-            btn.setStyleSheet("""
-                QToolButton { background: transparent; color: #eee; border-radius: 4px; padding: 4px; min-width: 24px; }
-                QToolButton:hover { background: #3a3a3a; }
-            """)
             return btn
         
         # Actions -> Buttons
@@ -151,20 +154,12 @@ class BrowserPane(QWidget):
         
         # URL Bar
         self.url_bar = QLineEdit()
+        self.url_bar.setObjectName("BrowserUrlBar")
         self.url_bar.setPlaceholderText("Enter URL or Search...")
-        self.url_bar.setStyleSheet("""
-            QLineEdit {
-                background-color: #333;
-                color: #eee;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 4px;
-            }
-        """)
         self.url_bar.returnPressed.connect(self.navigate_to_url)
         self.toolbar_layout.addWidget(self.url_bar, 1) # Stretch factor 1 to fill width
         
-        layout.addWidget(self.browser)
+        self.layout.addWidget(self.browser)
 
     def navigate_to_url(self):
         text = self.url_bar.text().strip()

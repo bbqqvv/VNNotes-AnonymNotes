@@ -1,9 +1,15 @@
-import sys
 import os
+import sys
 
-# Disable QtWebEngine logging to prevent debug.log generation
+# 1. FORCE SOFTWARE RENDERING (DIAMOND-STANDARD FIX FOR WHITE SCREEN)
+# MUST BE BEFORE ANY QT IMPORTS
+os.environ["QT_OPENGL"] = "software"
 os.environ["QTWEBENGINE_DISABLE_LOGGING"] = "1"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-logging --log-level=3 --log-file=NUL"
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+    "--disable-logging --log-level=3 --log-file=NUL "
+    "--disable-gpu --disable-gpu-compositing "
+    "--num-raster-threads=2 --enable-begin-frame-scheduling"
+)
 
 # Cleanup: Delete debug.log if it exists (Chromium artifact)
 try:
@@ -15,55 +21,48 @@ except:
 # 3. Windows Icon Fix (AppUserModelID) - MUST BE AT TOP
 if sys.platform == 'win32':
     import ctypes
-    # Define stable ID used by installer and app
-    MY_APP_ID = 'vtech.vnnotes.stable.v1'
+    MY_APP_ID = 'vtech.vnnotes.stable.v2'
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(MY_APP_ID)
 
-# Add project root to path to ensure imports work
+# Add project root to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 import logging
 from src.ui.main_window import MainWindow
 from src.core.logger import setup_logging
 
-# --- Global Exception Handler ---
 def exception_hook(exctype, value, traceback_obj):
-    """
-    Global function to catch unhandled exceptions.
-    Logs the error and displays a user-friendly message.
-    """
     import traceback
-    
-    # Format the traceback
     traceback_str = "".join(traceback.format_exception(exctype, value, traceback_obj))
-    
-    # Log the error
     logging.critical(f"Uncaught Exception:\n{traceback_str}")
-    print(f"CRASH: {value}") # Keep simple print for immediate dev feedback
-    
-    # Show Error Dialog (if QApplication is running)
     if QApplication.instance():
         error_msg = f"An unexpected error occurred:\n{value}\n\nSee log file for details."
         QMessageBox.critical(None, "VNNotes Crashed", error_msg)
 
-
 def main():
-    # 1. Setup Logging
+    sys.excepthook = exception_hook
     log_file = setup_logging()
     
-    # Enable WebEngine OpenGL sharing (Critical for performance/stability)
-    from PyQt6.QtCore import Qt
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-
+    # --- SENIOR DPI FIX ---
+    # software rendering works best with 'Round' or no specific policy in Qt6.
+    # 'PassThrough' often creates fractional raster errors that lead to white screens.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.Round
+    )
+    
+    # Ensure DWM (Windows Taskbar) can correctly see the window buffers
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    
     QApplication.setOrganizationName("vtechdigitalsolution")
     QApplication.setApplicationName("VNNotes")
     
     app = QApplication(sys.argv)
     
-    # Set App Icon (Global)
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
     else:
@@ -74,12 +73,10 @@ def main():
         icon_path = os.path.join(base_path, "appnote.png")
         
     if os.path.exists(icon_path):
-        from PyQt6.QtGui import QIcon
         app.setWindowIcon(QIcon(icon_path))
         
     app.setQuitOnLastWindowClosed(True) 
     
-    # Initialize
     window = MainWindow()
     window.show()
 
@@ -90,3 +87,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

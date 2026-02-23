@@ -23,9 +23,32 @@ class NoteService:
         if not self._notes:
             self._notes = [self.create_default_note_data()]
             
+        # Migration Check: If notes in data.json still contain content, move it to files
+        self._migrate_monolithic_to_distributed()
+            
         self.sanitize_ids()
+        self.sanitize_folders()
         self._is_loaded = True
         return self._notes
+
+    def _migrate_monolithic_to_distributed(self):
+        """
+        Surgically moves note content from data.json to individual files if found.
+        Cleans up memory immediately after migration.
+        """
+        migrated = False
+        for note in self._notes:
+            content = note.get("content")
+            if content is not None:
+                # Save to separate file
+                self.storage.save_note_content(note["obj_name"], content)
+                # Remove content from memory structure
+                del note["content"]
+                migrated = True
+        
+        if migrated:
+            logging.info("NoteService: Migration to distributed storage complete.")
+            self.save_to_disk() # Save the now-empty content list to data.json
 
     def sanitize_ids(self):
         """Ensures all notes have unique object names."""
@@ -52,6 +75,21 @@ class NoteService:
                 obj_name = new_name
             seen_ids.add(obj_name)
 
+    def sanitize_folders(self):
+        """Removes trailing counts from folder names that were accidentally saved."""
+        import re
+        pattern = r"(\s\(\d+\))+$"
+        changed = False
+        for note in self._notes:
+            folder = note.get("folder", "General")
+            clean_name = re.sub(pattern, "", folder)
+            if clean_name != folder:
+                note["folder"] = clean_name
+                changed = True
+        if changed:
+            logging.info("NoteService: Sanitized corrupted folder names in note data.")
+            self.save_to_disk()
+
     def get_notes(self):
         return self._notes
 
@@ -73,8 +111,7 @@ class NoteService:
             "obj_name": f"NoteDock_{new_id}",
             "title": title,
             "content": content,
-            "folder": folder,
-            "tags": tags or []
+            "folder": folder
         }
         self._notes.append(note)
         return note
@@ -94,20 +131,42 @@ class NoteService:
         # 2. Update or Add notes from UI
         for ui_note in current_notes_data:
             obj_name = ui_note["obj_name"]
+            content = ui_note.pop("content", None) # Extract content for separate saving
+            
             if obj_name in existing_map:
-                # Update existing (keep folder/tags if UI doesn't provide them)
-                existing_map[obj_name]["title"] = ui_note.get("title", existing_map[obj_name]["title"])
-                existing_map[obj_name]["content"] = ui_note.get("content", existing_map[obj_name].get("content", ""))
+                # Update existing metadata (title, folder, pinned, etc.)
+                existing_map[obj_name].update(ui_note)
             else:
-                # New Note (should have been added via add_note, but safety first)
+                # New Note
                 if "folder" not in ui_note: ui_note["folder"] = "General"
-                if "tags" not in ui_note: ui_note["tags"] = []
                 self._notes.append(ui_note)
+            
+            # Save content to its own file if provided
+            if content is not None:
+                self.storage.save_note_content(obj_name, content)
         
-        # 3. Save to Disk (ASYNC)
-        # self.storage.save_data(data) <- REMOVE SYNC SAVE
+        # 3. Save Metadata to Disk (ASYNC)
         self.save_to_disk()
         return True
+
+    def get_note_content(self, obj_name):
+        """Retrieves content from individual file storage."""
+        content = self.storage.load_note_content(obj_name)
+        logging.info(f"NoteService: Loaded content for {obj_name} (len={len(content)})")
+        return content
+
+    def _extract_tags_from_note(self, note):
+        """Regex to find #tag patterns in note content."""
+        import re
+        import html
+        content = note.get("content", "")
+        # Strip HTML for tagging search
+        text = re.sub(r'<[^<]+?>', '', content)
+        text = html.unescape(text)
+        
+        # Find tags: # followed by word characters, must be preceded by space or start of line
+        tags = re.findall(r'(?:^|\s)#([\w\d]+)', text)
+        note["tags"] = sorted(list(set(tags))) # Unique sorted tags
 
     def save_to_disk(self):
         """Persists current state to disk asynchronously."""
@@ -151,12 +210,34 @@ class NoteService:
                 note["title"] = new_title
                 return True
     def delete_note(self, note_obj_name):
-        """Deletes a note."""
+        """Deletes a note and its physical content file."""
         for i, note in enumerate(self._notes):
             if note["obj_name"] == note_obj_name:
                 del self._notes[i]
+                self.storage.delete_note_content(note_obj_name)
                 return True
         return False
+
+    def delete_notes_in_folder(self, folder_name):
+        """Deletes all notes in a specific folder. Returns list of deleted obj_names."""
+        to_delete = [n["obj_name"] for n in self._notes if n.get("folder") == folder_name]
+        deleted_ids = []
+        for obj_name in to_delete:
+            if self.delete_note(obj_name):
+                deleted_ids.append(obj_name)
+        return deleted_ids
+
+    def toggle_pin(self, note_obj_name):
+        """Toggles the pinned status of a note."""
+        for note in self._notes:
+            if note["obj_name"] == note_obj_name:
+                note["is_pinned"] = not note.get("is_pinned", False)
+                return note["is_pinned"]
+        return False
+
+    def get_pinned_notes(self):
+        """Returns all pinned notes."""
+        return [n for n in self._notes if n.get("is_pinned", False)]
 
     def rename_folder(self, old_name, new_name):
         """Renames a folder by updating all notes within it."""
@@ -177,11 +258,12 @@ class NoteService:
                 return note
         return None
 
-    def search_notes(self, query):
+    def search_notes(self, query, cancel_check=None):
         """
         Searches notes for query string in title or content.
         Returns a list of matching note objects.
         Case-insensitive.
+        cancel_check: optional callable returning True to abort early.
         """
         query = query.lower().strip()
         if not query:
@@ -189,48 +271,59 @@ class NoteService:
 
         matches = []
         import re
-        import html as html_module # Avoid conflict with html variable name if used
+        import html as html_module
         
         # Robust HTML content extractor
+        tag_re = re.compile(r'<[^<]+?>')
+        script_re = re.compile(r'<(style|script)[^>]*>.*?</\1>', flags=re.DOTALL | re.IGNORECASE)
+
         def get_text_content(html_content):
             if not html_content: return ""
-            # 1. Remove style and script blocks (non-greedy, dotall)
-            text = re.sub(r'<(style|script)[^>]*>.*?</\1>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
-            # 2. Remove HTML tags
-            text = re.sub(r'<[^<]+?>', '', text)
-            # 3. Decode HTML entities (e.g. &nbsp; -> space, &lt; -> <)
-            text = html_module.unescape(text)
-            return text
+            # Convert common line-breaking tags to newlines before stripping
+            text = re.sub(r'<(br|p|div|li|h[1-6])[^>]*>', '\n', html_content, flags=re.IGNORECASE)
+            text = script_re.sub('', text)
+            text = tag_re.sub('', text)
+            return html_module.unescape(text)
 
         for note in self._notes:
+            if cancel_check and cancel_check():
+                return matches  # Early exit on cancellation
             note_matches = []
             title = note.get("title", "").strip()
             content_html = note.get("content", "")
-            content_text = get_text_content(content_html)
             
+            # DECENTRALIZED SEARCH: If content isn't in memory, pull it from disk for searching
+            if not content_html:
+                content_html = self.get_note_content(note["obj_name"])
+            
+            # FAST CHECK: If query isn't in raw title or raw HTML, definitely skip
+            if query not in title.lower() and query not in content_html.lower():
+                continue
+
             # 1. Title Match
             if query in title.lower():
                  note_matches.append({"type": "title", "text": title})
             
-            # 2. Content Match (Find all occurrences)
-            lines = content_text.split('\n')
-            for i, line in enumerate(lines):
-                line_stripped = line.strip() # Remove excessive whitespace in line check
-                if query in line.lower():
-                    # Extract snippet
-                    idx = line.lower().find(query)
-                    
-                    # Improve snippet extraction to be around the match
-                    start = max(0, idx - 30)
-                    end = min(len(line), idx + len(query) + 30)
-                    
-                    snippet = line[start:end].strip()
-                    if start > 0: snippet = "..." + snippet
-                    if end < len(line): snippet = snippet + "..."
-                    
-                    # Only add if relevant (avoid empty lines that somehow matched??)
-                    if snippet:
-                        note_matches.append({"type": "content", "line": i + 1, "text": snippet})
+            # 2. Content Match (Only do expensive text stripping if found in raw HTML)
+            if query in content_html.lower():
+                content_text = get_text_content(content_html)
+                if query in content_text.lower():
+                    lines = content_text.split('\n')
+                    match_count = 0
+                    for i, line in enumerate(lines):
+                        if query in line.lower():
+                            idx = line.lower().find(query)
+                            start = max(0, idx - 30)
+                            end = min(len(line), idx + len(query) + 30)
+                            snippet = line[start:end].strip()
+                            if start > 0: snippet = "..." + snippet
+                            if end < len(line): snippet = snippet + "..."
+                            if snippet:
+                                note_matches.append({"type": "content", "line": i + 1, "text": snippet})
+                                match_count += 1
+                                if match_count >= 20: # Limit snippets for massive notes
+                                    note_matches.append({"type": "status", "text": "... and more found"})
+                                    break
             
             if note_matches:
                 matches.append({

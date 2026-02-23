@@ -47,3 +47,21 @@ env/
 
 # External Repos
 antigravity-awesome-skills/
+
+# Debug and temp files
+crash_stderr.txt
+s.txt
+debug_mtm.py
+cleanup_env.py
+test_*.py
+
+# UI references
+ui_reference_*.png
+
+# Temporary tool scripts
+tools/stress_test_gen.py
+tools/stress_test_cleanup.py
+tools/diag_paths.py
+tools/inject_perf_notes.py
+tools/ui_inspector.py
+tools/reset_app.py

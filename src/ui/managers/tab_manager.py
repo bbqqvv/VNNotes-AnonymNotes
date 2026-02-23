@@ -57,7 +57,8 @@ class TabManager:
         menu = QMenu(self.mw)
 
         if index >= 0:
-            rename_act = QAction("Rename Note", self.mw)
+            rename_icon = self.mw.theme_manager.get_icon("rename.svg")
+            rename_act = QAction(rename_icon, "Rename Note", self.mw)
             rename_act.triggered.connect(
                 lambda: self.on_tab_double_clicked(tab_bar, index))
 
@@ -204,7 +205,6 @@ class TabManager:
         except RuntimeError:
             pass
         self.mw.save_app_state()
-        self.mw.update_branding_visibility()
 
     def close_dock_at_tab_index(self, tab_bar, index):
         """Helper to find and remove a dock widget by its tab index."""
@@ -236,7 +236,6 @@ class TabManager:
                 pass
 
             self.mw.save_app_state()
-            self.mw.update_branding_visibility()
 
     def on_tab_changed(self, tab_bar, index):
         """Called when a tab is selected."""
@@ -292,7 +291,6 @@ class TabManager:
                     dock.close()
                     dock.deleteLater()
                     self.mw.save_app_state()
-                    self.mw.update_branding_visibility()
                     return
             except RuntimeError:
                 continue

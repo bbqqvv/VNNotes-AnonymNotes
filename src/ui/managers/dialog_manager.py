@@ -94,6 +94,8 @@ class DialogManager:
         <h2 style='color: #3498db;'>VNNotes</h2>
         <p><b>Version:</b> {CURRENT_VERSION}</p>
         <p><b>Author:</b> Bùi Quốc Văn</p>
+                <p><b>Email: <a href="mailto:vanbq.dev@gmail.com">vanbq.dev@gmail.com</a></p>
+
         <p><b>A modern, stealthy, and highly optimized note-taking application.</b></p>
         <hr>
         <p><b>Core Features:</b></p>
@@ -115,7 +117,14 @@ class DialogManager:
         if not self.mw.active_pane:
             return
         content = self.mw.active_pane.get_content_with_embedded_images()
-        self.mw.teleprompter = TeleprompterDialog(content, None)
+        
+        # Pass theme config so Teleprompter matches the app's look
+        theme_config = None
+        if hasattr(self.mw, 'theme_manager'):
+            from src.ui.managers.theme_manager import ThemeManager
+            theme_config = ThemeManager.THEME_CONFIG.get(self.mw.theme_manager.current_theme)
+        
+        self.mw.teleprompter = TeleprompterDialog(content, theme_config=theme_config)
         self.mw.teleprompter.show()
 
     def check_for_updates(self, manual=True):

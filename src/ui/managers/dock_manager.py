@@ -7,23 +7,28 @@ class DockManager:
     """
     Manages the creation, placement, and lifecycle of dock widgets.
     Handles 'Smart Docking' (Tabification) logic.
+    Uses an internal registry for O(1) dock lookups instead of findChildren.
     """
     def __init__(self, main_window):
         self.main_window = main_window
+        self._registry = {}  # obj_name -> QDockWidget
 
-    def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None):
+    def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None, zoom=100):
         if not obj_name:
             # Standardize naming to match services (NoteDock_N format ideally)
             # For now, keep the UUID logic for uniqueness but ensure it's recognizable
             uid = uuid.uuid4().hex
             obj_name = f"NoteDock_{uid[:8]}"
         
-        # Check if dock already exists
-        existing_dock = self.main_window.findChild(QDockWidget, obj_name)
+        # Check if dock already exists (O(1) registry lookup)
+        existing_dock = self._registry.get(obj_name)
         if existing_dock:
-            existing_dock.show()
-            existing_dock.raise_()
-            return existing_dock
+            try:
+                existing_dock.show()
+                existing_dock.raise_()
+                return existing_dock
+            except RuntimeError:
+                del self._registry[obj_name]
         
         dock = QDockWidget(title or "Note", self.main_window)
         dock.setObjectName(obj_name)
@@ -34,12 +39,12 @@ class DockManager:
         dock.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         
         from src.features.notes.note_pane import NotePane
-        note_pane = NotePane()
+        note_pane = NotePane(zoom=zoom)
+        note_pane.setObjectName(obj_name) # CRITICAL for Zero-Lag sync
         note_pane.file_path = file_path
         if content:
-            # Use deferred content for lazy loading only if it's large, 
-            # but for restoration we often want it immediate.
-            note_pane._deferred_content = content
+            # CORRECT: Use the manager's setter instead of setting on the editor directly
+            note_pane.paging_engine.set_deferred_content(content)
         
         # Connect signals
         if hasattr(self.main_window, 'set_active_pane'):
@@ -49,41 +54,56 @@ class DockManager:
         
         dock.setWidget(note_pane)
         
-        # Tabification logic
-        if anchor_dock:
-             self.main_window.tabifyDockWidget(anchor_dock, dock)
-        else:
-            main_docks = [d for d in self.main_window.findChildren(QDockWidget) 
-                          if d.objectName() != "SidebarDock" and d != dock]
-            if main_docks:
-                self.main_window.tabifyDockWidget(main_docks[-1], dock)
+        # ROOT CAUSE FIX: Register signals BEFORE adding to layout or showing.
+        self._register_dock(dock)
+        
+        # Tabification logic - Skip during restoration (restoreState handles it)
+        if not self.main_window._is_restoring:
+            if anchor_dock:
+                 self.main_window.tabifyDockWidget(anchor_dock, dock)
             else:
-                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+                # Use registry for O(1) dock lookup instead of findChildren
+                main_docks = [d for d in self.get_all_content_docks()
+                              if d != dock 
+                              and self.main_window.dockWidgetArea(d) == Qt.DockWidgetArea.RightDockWidgetArea]
+                if main_docks:
+                    self.main_window.tabifyDockWidget(main_docks[-1], dock)
+                else:
+                    self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        else:
+            # Consistent placement for restoration
+            self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         
         dock.show()
-        dock.raise_()
-        self._register_dock(dock)
+        if not self.main_window._is_restoring:
+            dock.raise_()
+            
         return dock
 
     def add_browser_dock(self, url=None, obj_name=None, anchor_dock=None):
         if not obj_name:
             # Standardize naming to match BrowserService logic
             max_id = 0
-            for d in self.main_window.findChildren(QDockWidget):
-                name = d.objectName()
-                if name.startswith("BrowserDock_"):
-                    try:
+            for d in list(self._registry.values()):
+                try:
+                    name = d.objectName()
+                    if name.startswith("BrowserDock_"):
                         bid = int(name.split("_")[1])
                         if bid > max_id: max_id = bid
-                    except (ValueError, IndexError): pass
+                except (ValueError, IndexError, RuntimeError): 
+                    # RuntimeError handles "wrapped C/C++ object has been deleted"
+                    pass
             obj_name = f"BrowserDock_{max_id + 1}"
 
-        # Check if exists
-        existing_dock = self.main_window.findChild(QDockWidget, obj_name)
+        # Check if exists (O(1) registry lookup)
+        existing_dock = self._registry.get(obj_name)
         if existing_dock:
-            existing_dock.show()
-            existing_dock.raise_()
-            return existing_dock
+            try:
+                existing_dock.show()
+                existing_dock.raise_()
+                return existing_dock
+            except RuntimeError:
+                del self._registry[obj_name]
 
         dock = QDockWidget("Mini Browser", self.main_window)
         dock.setObjectName(obj_name)
@@ -99,32 +119,41 @@ class DockManager:
         
         browser.title_changed.connect(lambda t: self._update_dock_title(dock, t))
 
-        # Tabification
-        if anchor_dock:
-             self.main_window.tabifyDockWidget(anchor_dock, dock)
-        else:
-            main_docks = [d for d in self.main_window.findChildren(QDockWidget) 
-                          if d.objectName() != "SidebarDock" and d != dock]
-            if main_docks:
-                self.main_window.tabifyDockWidget(main_docks[-1], dock)
+        # ROOT CAUSE FIX: Register signals BEFORE adding to layout or showing.
+        self._register_dock(dock)
+
+        # Tabification - Skip during restoration
+        if not self.main_window._is_restoring:
+            if anchor_dock:
+                 self.main_window.tabifyDockWidget(anchor_dock, dock)
             else:
-                self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+                main_docks = [d for d in self.get_all_content_docks() if d != dock]
+                if main_docks:
+                    self.main_window.tabifyDockWidget(main_docks[-1], dock)
+                else:
+                    self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        else:
+            self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
             
         dock.show()
-        dock.raise_()
-        self._register_dock(dock)
+        if not self.main_window._is_restoring:
+            dock.raise_()
         
         # Sidebar refresh
         if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
             self.main_window.sidebar.refresh_tree()
+            
         return dock
 
     def add_clipboard_dock(self, clipboard_manager_instance):
-        existing = self.main_window.findChild(QDockWidget, "ClipboardDock")
+        existing = self._registry.get("ClipboardDock")
         if existing:
-            existing.show()
-            existing.raise_()
-            return existing
+            try:
+                existing.show()
+                existing.raise_()
+                return existing
+            except RuntimeError:
+                del self._registry["ClipboardDock"]
 
         dock = QDockWidget("Clipboard History", self.main_window)
         dock.setObjectName("ClipboardDock")
@@ -142,16 +171,25 @@ class DockManager:
         clipboard_pane.update_history(clipboard_manager_instance.get_history())
 
         dock.setWidget(clipboard_pane)
-        self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self._register_dock(dock)
+        self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         return dock
 
     def _register_dock(self, dock):
+        obj_name = dock.objectName()
+        self._registry[obj_name] = dock
+        
         if hasattr(self.main_window, 'check_docks_closed'):
             dock.visibilityChanged.connect(lambda _: self.main_window.check_docks_closed())
         
-        # Connection for destroyed to cleanup sidebar
-        dock.destroyed.connect(lambda: self._on_dock_destroyed(dock))
+        # Connection for destroyed to cleanup registry, sidebar and MainWindow cache
+        dock.destroyed.connect(lambda obj: self._on_dock_destroyed(obj))
+        if hasattr(self.main_window, 'on_dock_destroyed'):
+            dock.destroyed.connect(self.main_window.on_dock_destroyed)
+        
+        # Re-trigger tab bar hook (single-shot timer) when dock layout changes
+        if hasattr(self.main_window, 'tab_hook_timer'):
+            self.main_window.tab_hook_timer.start(200)
 
     def _update_dock_title(self, dock, title):
         if not title: return
@@ -164,6 +202,11 @@ class DockManager:
             except RuntimeError: pass
 
     def _on_dock_destroyed(self, dock):
+        # Clean up registry
+        to_remove = [k for k, v in self._registry.items() if v is dock]
+        for k in to_remove:
+            del self._registry[k]
+
         try:
             if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
                 self.main_window.sidebar.refresh_tree()
@@ -171,18 +214,49 @@ class DockManager:
                 self.main_window.check_docks_closed()
         except RuntimeError: pass
 
+    # --- Registry Query Helpers ---
+
+    def get_dock(self, obj_name):
+        """O(1) dock lookup by object name."""
+        dock = self._registry.get(obj_name)
+        if dock:
+            try:
+                _ = dock.objectName()  # Verify not deleted
+                return dock
+            except RuntimeError:
+                del self._registry[obj_name]
+        return None
+
+    def get_all_content_docks(self):
+        """Returns all registered docks except SidebarDock."""
+        result = []
+        stale = []
+        for name, dock in self._registry.items():
+            try:
+                if dock.objectName() != "SidebarDock":
+                    result.append(dock)
+            except RuntimeError:
+                stale.append(name)
+        for name in stale:
+            del self._registry[name]
+        return result
+
+    def get_note_docks(self):
+        """Returns only note docks."""
+        return [d for d in self.get_all_content_docks() if d.objectName().startswith("NoteDock_")]
+
+    def get_browser_docks(self):
+        """Returns only browser docks."""
+        return [d for d in self.get_all_content_docks() if d.objectName().startswith("BrowserDock_")]
+
     def close_all_notes(self):
-        from src.features.notes.note_pane import NotePane
-        for dock in self.main_window.findChildren(QDockWidget):
-            if isinstance(dock.widget(), NotePane):
-                dock.close()
+        for dock in list(self.get_note_docks()):
+            dock.close()
 
     def close_all_browsers(self):
-        for dock in self.main_window.findChildren(QDockWidget):
-            if dock.objectName().startswith("BrowserDock_"):
-                dock.close()
+        for dock in list(self.get_browser_docks()):
+            dock.close()
 
     def close_all_docks(self):
-        for dock in self.main_window.findChildren(QDockWidget):
-            if dock.objectName() != "SidebarDock":
-                dock.close()
+        for dock in list(self.get_all_content_docks()):
+            dock.close()

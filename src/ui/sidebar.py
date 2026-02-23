@@ -1,10 +1,83 @@
+import html as html_module
 import logging
 import os
+import re
+import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, 
                              QMenu, QMessageBox, QLabel, QHBoxLayout, QFrame, QInputDialog, QToolBar, QLineEdit,
-                             QDockWidget)
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QIcon, QFont, QAction
+                             QDockWidget, QStyledItemDelegate, QApplication, QStyleOptionViewItem,
+                             QTreeWidgetItemIterator, QPushButton, QSizePolicy)
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QRectF
+from PyQt6.QtGui import QIcon, QFont, QAction, QTextDocument, QAbstractTextDocumentLayout, QPalette, QPainter, QColor
+from src.utils.ui_utils import get_icon, get_icon_dir
+
+class HtmlItemDelegate(QStyledItemDelegate):
+    """Renders tree items with HTML (for keyword highlighting in search results)."""
+    
+    def paint(self, painter, option, index):
+        options = QStyleOptionViewItem(option)
+        self.initStyleOption(options, index)
+        
+        painter.save()
+        
+        # 1. Prepare HTML Document
+        doc = QTextDocument()
+        doc.setDefaultFont(options.font)
+        # CRITICAL: Remove default <p> tag top/bottom margins that Qt adds
+        # when setHtml() is called. Without this, each item renders double-height.
+        doc.setDocumentMargin(0)
+        
+        text = options.text
+        if '<' in text and '>' in text:
+            doc.setHtml(text)
+        else:
+            doc.setPlainText(text)
+        
+        # 2. Draw standard background and selection (WITHOUT TEXT)
+        options.text = ""
+        style = options.widget.style() if options.widget else QApplication.style()
+        style.drawControl(style.ControlElement.CE_ItemViewItem, options, painter, options.widget)
+        
+        # 3. Calculate text rectangle
+        text_rect = style.subElementRect(style.SubElement.SE_ItemViewItemText, options, options.widget)
+        
+        # 4. Use a very wide text width to prevent wrapping (single-line render)
+        doc.setTextWidth(max(text_rect.width(), 9999))
+        
+        # 5. Draw HTML — clip strictly to text_rect to prevent bleeding
+        painter.translate(text_rect.left(), text_rect.top())
+        clip = QRectF(0, 0, text_rect.width(), text_rect.height())
+        
+        ctx = QAbstractTextDocumentLayout.PaintContext()
+        if option.state & style.StateFlag.State_Selected:
+            ctx.palette.setColor(QPalette.ColorRole.Text, option.palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText))
+        else:
+            ctx.palette.setColor(QPalette.ColorRole.Text, option.palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Text))
+        
+        painter.setClipRect(clip)
+        doc.documentLayout().draw(painter, ctx)
+        painter.restore()
+    
+    def sizeHint(self, option, index):
+        options = QStyleOptionViewItem(option)
+        self.initStyleOption(options, index)
+        
+        doc = QTextDocument()
+        doc.setDefaultFont(options.font)
+        doc.setDocumentMargin(0)
+        text = options.text
+        if '<' in text and '>' in text:
+            doc.setHtml(text)
+        else:
+            doc.setPlainText(text)
+        doc.setTextWidth(9999)
+        
+        # Get base size from superclass if possible, or calculate from doc
+        size = super().sizeHint(option, index)
+        # Balanced vertical spacing: +4 for compact look (2px top/bottom)
+        size.setHeight(max(size.height(), int(doc.size().height()) + 2))
+        return size
+
 
 class NoteTreeWidget(QTreeWidget):
     """Custom QTreeWidget that restricts drag-drop: notes can only be dropped onto folders."""
@@ -40,6 +113,27 @@ class NoteTreeWidget(QTreeWidget):
         event.ignore()
 
 
+
+class NoteSearchThread(QThread):
+    results_found = pyqtSignal(list)
+    
+    def __init__(self, note_service, query):
+        super().__init__()
+        self.note_service = note_service
+        self.query = query
+        self._cancelled = False
+    
+    def cancel(self):
+        self._cancelled = True
+        
+    def run(self):
+        results = self.note_service.search_notes(
+            self.query,
+            cancel_check=lambda: self._cancelled
+        )
+        if not self._cancelled:
+            self.results_found.emit(results)
+
 class SidebarWidget(QWidget):
     """
     Sidebar for managing folders and tags.
@@ -49,13 +143,50 @@ class SidebarWidget(QWidget):
     folder_selected = pyqtSignal(str) # Emits folder name
     note_renamed = pyqtSignal(str, str) # obj_name, new_title
     note_deleted = pyqtSignal(str) # obj_name
+    search_result_picked = pyqtSignal(str, str, int) # obj_name, query, line
     
     def __init__(self, note_service, parent=None):
         super().__init__(parent)
         self.main_window = parent
+        # SENIOR ARCHITECTURE: Use Preferred width to protect user-dragged size
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.note_service = note_service
+        
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(300) # 300ms debounce
+        self.search_timer.timeout.connect(lambda: self.start_search())
+        
+        self.current_search_thread = None
+        self._last_search_results = None  # Cache search results for theme changes
+        
+        # SENIOR MEMORY: Load last stable width from config
+        self._last_stable_width = self.main_window.config.get_value("window/sidebar_width", 300)
+        try:
+            self._last_stable_width = int(self._last_stable_width)
+        except (ValueError, TypeError):
+            self._last_stable_width = 600
+        
+        # Senior Magnet: Snapping & Release Detection
+        self._is_snapping = False
+        self._pending_collapse = False
+        self._in_resize_logic = False
+        
         self.setup_ui()
+        self._note_item_map = {} # O(1) Mapping for Diamond-Standard performance
         self.refresh_tree()
+        
+    def sizeHint(self):
+        """Native Qt: The ultimate source of truth for 'Nguyên trạng' width."""
+        if self._is_snapping:
+            return QSize(0, 0)
+        return QSize(int(self._last_stable_width), 600)
+
+    def minimumSizeHint(self):
+        """Lock in the stable minimum floor."""
+        return QSize(80, 100)
+
+    # Removed custom paintEvent to let standard Qt/QSS handle background
         
     def setup_ui(self):
         # 1. Initialize Tree FIRST
@@ -72,17 +203,22 @@ class SidebarWidget(QWidget):
         self.tree.setAcceptDrops(True)
         self.tree.setDragDropMode(QTreeWidget.DragDropMode.InternalMove)
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.tree.setVerticalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
+        
+        # HTML delegate for keyword highlighting in search results
+        self._html_delegate = HtmlItemDelegate(self.tree)
 
         # 2. Setup Layouts
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(4) # Add small breathing room between search/header/tree
         
         # 3. Header & Toolbar
         header_frame = QFrame()
         header_frame.setObjectName("SidebarHeader")
+        header_frame.setMinimumHeight(40) # Tighter for a compact, balanced look
         header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(5, 5, 5, 5)
+        header_layout.setContentsMargins(6, 0, 4, 0)
         
         title_label = QLabel("EXPLORER")
         title_label.setObjectName("SidebarTitle")
@@ -93,17 +229,23 @@ class SidebarWidget(QWidget):
         
         # Toolbar
         self.toolbar = QToolBar()
-        self.toolbar.setIconSize(QSize(14, 14)) # Compact size
-        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly) # FORCE ICONS
-        self.toolbar.setStyleSheet("QToolBar { background: transparent; border: none; } QToolButton { padding: 2px; border-radius: 4px; } QToolButton:hover { background-color: rgba(255, 255, 255, 0.1); }")
+        self.toolbar.setIconSize(QSize(14, 14)) # Larger for better contrast
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.toolbar.setStyleSheet("""
+            QToolBar { 
+                background: transparent; 
+                border: none; 
+                spacing: 0px;
+            }
+            QToolBar QToolButton {
+                margin: 0px;
+                padding: 1px;
+                min-width: 20px;
+                min-height: 20px;
+            }
+        """)
         
-        # Icons
-        base_icon_path = "assets/icons/dark_theme" 
-        import os
-        if not os.path.exists(base_icon_path):
-             base_icon_path = r"d:\Workspace\Tool\TH\VNNotes\assets\icons\dark_theme"
-
-        # Actions
+        # Actions (icons handled by update_toolbar_icons)
         self.update_toolbar_icons()
         
         header_layout.addWidget(self.toolbar)
@@ -114,51 +256,135 @@ class SidebarWidget(QWidget):
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search notes (Ctrl+Shift+F)...")
         self.search_bar.setObjectName("SidebarSearch")
-        self.search_bar.textChanged.connect(self.filter_notes)
-        self.search_bar.hide() # Hidden by default
+        self.search_bar.textChanged.connect(lambda: self.search_timer.start())
+        self.search_bar.hide()
         layout.addWidget(self.search_bar)
+        
+        self.search_status = QLabel("")
+        self.search_status.setObjectName("SearchStatus")
+        self.search_status.setStyleSheet("""
+            QLabel#SearchStatus { 
+                color: #569CD6; 
+                font-size: 11px; 
+                font-weight: 500;
+                margin-left: 10px; 
+                margin-bottom: 5px;
+            }
+        """)
+        self.search_status.hide()
+        layout.addWidget(self.search_status)
         
         layout.addWidget(self.tree)
         
-    def _get_base_icon_path(self):
-        """Helper to get icon path based on current theme."""
-        theme = "dark"
+    def showEvent(self, event):
+        """Ensure layout is recalculated once shown."""
+        super().showEvent(event)
+        self.tree.updateGeometry()
+        if self.tree.viewport():
+            self.tree.viewport().update()
+
+    def resizeEvent(self, event):
+        """Auto-collapse sidebar if it becomes too narrow to show icons properly."""
+        try:
+            super().resizeEvent(event)
+        except Exception as e:
+            logging.error(f"Sidebar: resizeEvent super failed: {e}")
+            return
+        
+        current_width = event.size().width()
+
+        if self.main_window._is_restoring:
+            return
+
+        # Guard against recursive resize calls from magnet snap
+        if self._in_resize_logic:
+            return
+        self._in_resize_logic = True
+        
+        try:
+            is_dragging = QApplication.mouseButtons() & Qt.MouseButton.LeftButton
+            sd = getattr(self.main_window, 'sidebar_dock', None)
+            
+            if is_dragging:
+                if sd:
+                    if current_width < 180:
+                        # 1. Visual Snap (The "Hít" Feel): Use resizeDocks to drop width to 0 
+                        if not self._pending_collapse:
+                            self._pending_collapse = True
+                            logging.info(f"Sidebar: Snap threshold reached. Buffering width: {self._last_stable_width}px")
+                            sd.setMinimumWidth(0)
+                        
+                        # Command the layout engine to collapse visually
+                        self.main_window.resizeDocks([sd], [0], Qt.Orientation.Horizontal)
+                        
+                        # Activate the hardware-level mouse release watchdog
+                        if hasattr(self.main_window, '_sidebar_watchdog') and not self.main_window._sidebar_watchdog.isActive():
+                            self.main_window._sidebar_watchdog.start()
+                        return 
+                            
+                    elif current_width >= 180:
+                        # 2. Memory Persistence: Update stable width in RAM ONLY during drag
+                        self._last_stable_width = current_width
+                        
+                        # Reclamation: Dragged back out of the danger zone
+                        if self._pending_collapse:
+                            self._pending_collapse = False
+                            logging.debug(f"Sidebar: Dragged back to {current_width}px. Collapse aborted.")
+                            sd.setMinimumWidth(80)
+                            sd.setMaximumWidth(600)
+            else:
+                # NOT dragging (window resize or programmatic resize). 
+                self._pending_collapse = False
+                if current_width >= 180:
+                    self._last_stable_width = current_width
+                    self.main_window.config.set_value("window/sidebar_width", current_width)
+        finally:
+            self._in_resize_logic = False
+
+    # Removed _check_mouse_release: MainWindow now handles this via eventFilter for safety.
+
+    def _do_auto_collapse(self):
+        """Cleanly collapses the sidebar. Safe to call instantly thanks to removeDockWidget."""
+        try:
+            if hasattr(self.main_window, 'sidebar_dock'):
+                sd = self.main_window.sidebar_dock
+                if sd.isVisible():
+                    # Execute Nuclear Excision instantly
+                    self.main_window.toggle_sidebar()
+        except RuntimeError:
+            pass
+
+    def _get_is_dark(self):
+        """Helper to check if dark mode is active."""
         if hasattr(self.main_window, 'theme_manager'):
-            theme = self.main_window.theme_manager.current_theme
-        
-        folder = "dark_theme" if theme == "dark" else "light_theme"
-        base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets", "icons", folder)
-        
-        if not os.path.exists(base_path):
-             # Fallback
-             base_path = f"assets/icons/{folder}"
-        return base_path
+            return self.main_window.theme_manager.is_dark_mode
+        return True
+
+    def _get_base_icon_path(self):
+        """Helper to get icon path based on current theme via ui_utils."""
+        return get_icon_dir(self._get_is_dark())
 
     def update_toolbar_icons(self):
-        """Updates toolbar icons based on current theme."""
+        """Updates toolbar icons based on current theme using ui_utils."""
         self.toolbar.clear()
-        base_path = self._get_base_icon_path()
+        is_dark = self._get_is_dark()
         
-        def get_icon(name):
-            p = os.path.join(base_path, name)
-            return QIcon(p) if os.path.exists(p) else QIcon()
-
-        new_note_act = QAction(get_icon("note-add.svg"), "New Note", self)
+        new_note_act = QAction(get_icon("note-add.svg", is_dark), "New Note", self)
         new_note_act.setToolTip("New Note")
         new_note_act.triggered.connect(lambda: self.add_new_note())
         self.toolbar.addAction(new_note_act)
         
-        new_folder_act = QAction(get_icon("folder-add.svg"), "New Folder", self)
+        new_folder_act = QAction(get_icon("folder-add.svg", is_dark), "New Folder", self)
         new_folder_act.setToolTip("New Folder")
         new_folder_act.triggered.connect(self.add_new_folder)
         self.toolbar.addAction(new_folder_act)
         
-        refresh_act = QAction(get_icon("refresh.svg"), "Refresh", self)
+        refresh_act = QAction(get_icon("refresh.svg", is_dark), "Refresh", self)
         refresh_act.setToolTip("Refresh List")
         refresh_act.triggered.connect(self.refresh_tree)
         self.toolbar.addAction(refresh_act)
         
-        collapse_act = QAction(get_icon("collapse-all.svg"), "Collapse All", self)
+        collapse_act = QAction(get_icon("collapse-all.svg", is_dark), "Collapse All", self)
         collapse_act.setToolTip("Collapse All Folders")
         collapse_act.triggered.connect(self.tree.collapseAll) 
         self.toolbar.addAction(collapse_act)
@@ -172,18 +398,99 @@ class SidebarWidget(QWidget):
             self.search_bar.selectAll()
         else:
             self.search_bar.clear() # Clear search when hiding
+            self.search_status.hide()
+            self._last_search_results = None  # Clear cache
+            self.tree.setItemDelegate(QStyledItemDelegate(self.tree))  # Reset to default
+            self.refresh_tree()
             self.tree.setFocus()
-        
+
+    def update_note_title(self, obj_name, new_title):
+        """DIAMOND OPTIMIZATION: Instant O(1) update using internal mapping."""
+        item = self._note_item_map.get(obj_name)
+        if item:
+            try:
+                item.setText(0, new_title)
+                return
+            except RuntimeError:
+                # Item's C++ object was deleted (e.g. sidebar is in search mode
+                # and tree.clear() was called). Remove stale reference.
+                self._note_item_map.pop(obj_name, None)
+
+        # Fallback: walk the tree (rare — only if map is stale)
+        it = QTreeWidgetItemIterator(self.tree)
+        while it.value():
+            i = it.value()
+            try:
+                data = i.data(0, Qt.ItemDataRole.UserRole)
+                if data and data.get("type") == "note" and data.get("obj_name") == obj_name:
+                    i.setText(0, new_title)
+                    self._note_item_map[obj_name] = i  # Re-cache
+                    return
+            except RuntimeError:
+                pass
+            it += 1
+
+
     def refresh_tree(self):
         """Rebuilds the tree structure from NoteService data."""
+        # If search is active, skip refresh — CSS applies automatically
+        if self.search_bar.isVisible() and self.search_bar.text().strip():
+            return
+        
+        # Reset HTML delegate to default for normal tree display
+        self.tree.setItemDelegate(QStyledItemDelegate(self.tree))
+        
+        # Capture current expansion states before clear
+        expanded_folders = set()
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if data and data.get("type") == "folder" and item.isExpanded():
+                expanded_folders.add(data.get("name"))
+        
+        self.tree.blockSignals(True)
         self.tree.clear()
+        self._note_item_map.clear() # Reset mapping
         
-        base_icon_path = self._get_base_icon_path()
-        folder_icon = QIcon(os.path.join(base_icon_path, "folder-open.svg"))
-        note_icon = QIcon(os.path.join(base_icon_path, "note.svg"))
+        is_dark = self._get_is_dark()
+        folder_icon = get_icon("folder-open.svg", is_dark)
+        note_icon = get_icon("note.svg", is_dark)
+        pin_icon = get_icon("pin.svg", is_dark)
         
+        # 1. Pinned Notes Section
+        pinned_notes = self.note_service.get_pinned_notes()
+        if pinned_notes:
+            pin_folder = QTreeWidgetItem(self.tree)
+            pin_folder.setText(0, f"Pinned ({len(pinned_notes)})")
+            pin_folder.setIcon(0, pin_icon)
+            pin_folder.setData(0, Qt.ItemDataRole.UserRole, {"type": "pinned_folder"})
+            pin_folder.setExpanded(True)
+            font = pin_folder.font(0)
+            font.setBold(True)
+            pin_folder.setFont(0, font)
+            
+            for note in pinned_notes:
+                obj_name = note.get("obj_name")
+                item = QTreeWidgetItem(pin_folder)
+                item.setText(0, note.get("title", "Untitled"))
+                item.setIcon(0, note_icon)
+                item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name, "pinned": True})
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
+                self._note_item_map[obj_name] = item # Cache for O(1) sync
+
         notes = self.note_service.get_notes()
-        config_structure = self._group_notes_by_folder(notes)
+        
+        # In-memory sanitization for grouping (merges "General (1)" into "General")
+        folder_clean_pattern = r"(\s\(\d+\))+$"
+        sanitized_notes = []
+        for n in notes:
+            # Create a shallow copy to avoid modifying service data directly here
+            # although service already sanitized it on load, this is defensive.
+            n_copy = n.copy()
+            n_copy["folder"] = re.sub(folder_clean_pattern, "", n.get("folder", "General"))
+            sanitized_notes.append(n_copy)
+            
+        config_structure = self._group_notes_by_folder(sanitized_notes)
         
         # Sort folders (General first, then alphabetical)
         sorted_folders = sorted(config_structure.keys())
@@ -192,37 +499,70 @@ class SidebarWidget(QWidget):
              sorted_folders.insert(0, "General")
              
         for folder in sorted_folders:
+            folder_notes = config_structure[folder]
+            note_count = len(folder_notes)
+            
+            # Use name directly since it was sanitized before grouping
+            clean_name = folder
+            
             folder_item = QTreeWidgetItem(self.tree)
-            folder_item.setText(0, f"{folder}") 
+            folder_item.setText(0, f"{clean_name} ({note_count})") 
             folder_item.setIcon(0, folder_icon)
-            folder_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "folder", "name": folder})
-            folder_item.setExpanded(True)
+            folder_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "folder", "name": clean_name})
+            
+            # Restore expansion state (default to True only for "Pinned", or if it was expanded)
+            if clean_name in expanded_folders or clean_name == "Pinned":
+                folder_item.setExpanded(True)
+            else:
+                folder_item.setExpanded(False)
             folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsDropEnabled | Qt.ItemFlag.ItemIsEditable)
             folder_item.setFlags(folder_item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled) 
             
-            # Use a slightly bolder font for folders
             font = folder_item.font(0)
             font.setBold(True)
+            font.setPointSize(9)
             folder_item.setFont(0, font)
             
-            folder_notes = config_structure[folder]
+            # Use folder_notes which we calculated above
             for note in folder_notes:
+                obj_name = note.get("obj_name")
                 note_item = QTreeWidgetItem(folder_item)
                 note_title = note.get("title", "Untitled")
                 note_item.setText(0, note_title) # No emoji
                 note_item.setIcon(0, note_icon)
-                note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": note.get("obj_name")})
+                note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name})
                 note_item.setToolTip(0, note.get("content", "")[:100])
+                self._note_item_map[obj_name] = note_item # Cache for O(1) sync
                 
                 # Enable Drag & EDITING
                 note_item.setFlags(note_item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
                 note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
+                
+                # Professional styling: lighter weight for note items
+                note_font = note_item.font(0)
+                note_font.setPointSize(9)
+                note_item.setFont(0, note_font)
 
         # ── Browser docks section ──────────────────────────────────────
-        self._add_browser_section(base_icon_path)
+        self._add_browser_section()
+        self.tree.blockSignals(False)
+        
+        # FIX: Force immediate layout recalculation to ensure scrollbars appear correctly
+        self.tree.updateGeometry()
+        if self.tree.viewport():
+            self.tree.viewport().update()
+            
+        # Root Cause Fix: Explicitly check scrollbar visibility
+        vsb = self.tree.verticalScrollBar()
+        if vsb:
+            vsb.update()
+            
+        # Nudge: Final safety for slow rendering monitors
+        QTimer.singleShot(150, lambda: self.tree.updateGeometry())
 
-    def _add_browser_section(self, base_icon_path):
+    def _add_browser_section(self):
         """Add a 'Browsers' folder showing all open BrowserPane docks."""
+        base_icon_path = self._get_base_icon_path() # Still needed for some local logic if any, but let's try to remove param
         if not self.main_window:
             return
         browser_docks = []
@@ -239,8 +579,9 @@ class SidebarWidget(QWidget):
         if not browser_docks:
             return
 
-        browser_icon = QIcon(os.path.join(base_icon_path, "browser.svg"))
-        folder_icon = QIcon(os.path.join(base_icon_path, "browser.svg"))
+        is_dark = self._get_is_dark()
+        browser_icon = get_icon("browser.svg", is_dark)
+        folder_icon = get_icon("browser.svg", is_dark)
 
         folder_item = QTreeWidgetItem(self.tree)
         folder_item.setText(0, "Browsers")
@@ -311,32 +652,48 @@ class SidebarWidget(QWidget):
                 break
                 
         # 3. Deferred refresh
-        from PyQt6.QtCore import QTimer
         QTimer.singleShot(50, self.refresh_tree)
 
-    def filter_notes(self, query):
-        """Filters the tree based on search query."""
-        query = query.strip().lower()
-        
-        # If query is empty, refresh tree to show standard structure
+    def start_search(self):
+        """Kicks off the background search thread."""
+        query = self.search_bar.text().strip().lower()
         if not query:
+            self.search_status.hide()
             self.refresh_tree()
             return
             
+        # Cancel previous thread cleanly if still running
+        if self.current_search_thread and self.current_search_thread.isRunning():
+            self.current_search_thread.cancel()
+            self.current_search_thread.wait(500)  # Wait up to 500ms for graceful exit
+            
+        self.search_status.setText("Searching...")
+        self.search_status.show()
+        
+        # Immediate visual feedback: Clear tree or keep old results?
+        # Better to keep tree but show "Searching..." label
+        
+        self.current_search_thread = NoteSearchThread(self.note_service, query)
+        self.current_search_thread.results_found.connect(self.display_search_results)
+        self.current_search_thread.start()
+
+    def display_search_results(self, results):
+        """Updates the UI with result list from background thread."""
+        self._last_search_results = results  # Cache for theme-change re-display
+        query = self.search_bar.text().strip()
+        self.search_status.setText(f"Found {len(results)} note(s) matching '{query}'")
+        
         # Clear tree to build search results
+        self.tree.blockSignals(True)
         self.tree.clear()
         
-        # Get matches from backend
-        # Expected structure: [{"note": note, "matches": [{"type": "content", "line": 1, "text": "..."}]}]
-        results = self.note_service.search_notes(query)
+        # Enable HTML rendering for keyword highlights
+        self.tree.setItemDelegate(self._html_delegate)
         
         # Re-use icons
-        base_icon_path = "assets/icons/dark_theme" 
-        import os
-        if not os.path.exists(base_icon_path):
-             base_icon_path = r"d:\Workspace\Tool\TH\VNNotes\assets\icons\dark_theme"
-
-        note_icon = QIcon(f"{base_icon_path}/note.svg")
+        is_dark = self._get_is_dark()
+        note_icon = get_icon("note.svg", is_dark)
+        folder_icon = get_icon("folder-open.svg", is_dark)
         # Snippet icon? Maybe a small dot or just text
         
         # Group by Folder for context
@@ -353,7 +710,7 @@ class SidebarWidget(QWidget):
         for folder in sorted(grouped_results.keys()):
             folder_item = QTreeWidgetItem(self.tree)
             folder_item.setText(0, f"{folder}")
-            folder_item.setIcon(0, QIcon(f"{base_icon_path}/folder-open.svg"))
+            folder_item.setIcon(0, folder_icon)
             folder_item.setExpanded(True)
             # Make folder items not selectable/actionable in search mode? Or keep standard?
             # Creating standard folder structure allows drag/drop even in search?
@@ -369,25 +726,56 @@ class SidebarWidget(QWidget):
                 note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": note.get("obj_name")})
                 note_item.setExpanded(True)
                 
-                # Add Snippets as children
+                # Add Snippets as children with keyword highlighting
                 for m in matches:
                     if m["type"] == "content":
                         snippet_item = QTreeWidgetItem(note_item)
-                        # Format: Line X: ... text ...
-                        text = f"Line {m['line']}: {m['text']}"
-                        snippet_item.setText(0, text)
-                        # Use a different font/color for snippet
-                        font = snippet_item.font(0)
+                        # Highlight query keyword in snippet text
+                        text = m['text']
+                        # Add a visual cue to snippets
+                        indent_cue = "• " 
+                        highlighted_text = self._highlight_keyword(f"{indent_cue}{text}", query)
+                        snippet_item.setText(0, highlighted_text)
+                        
+                        # Use a professional monospace-ish font for snippets
+                        font = QFont("Consolas", 9) if sys.platform == "win32" else QFont("Monospace", 9)
                         font.setItalic(True)
-                        font.setPointSize(9)
                         snippet_item.setFont(0, font)
-                        # Store data to jump to line?
+                        
                         snippet_item.setData(0, Qt.ItemDataRole.UserRole, {
                             "type": "snippet", 
                             "obj_name": note.get("obj_name"),
                             "line": m["line"]
                         })
                         snippet_item.setToolTip(0, m["text"])
+                    elif m["type"] == "status":
+                        status_item = QTreeWidgetItem(note_item)
+                        status_item.setText(0, m["text"])
+                        font = status_item.font(0)
+                        font.setItalic(True)
+                        status_item.setFont(0, font)
+
+        self.tree.blockSignals(False)
+        self.tree.updateGeometry()
+        if self.tree.viewport():
+            self.tree.viewport().update()
+        QTimer.singleShot(100, lambda: self.tree.updateGeometry())
+
+    def _highlight_keyword(self, text, keyword):
+        """Wraps occurrences of keyword in the text with yellow highlight HTML."""
+        if not keyword:
+            return text
+        safe_text = html_module.escape(text)
+        safe_keyword = html_module.escape(keyword)
+        
+        # Case-insensitive replace with highlighted span
+        # Pattern to replace keyword with highlight. Uses a high-contrast but rounded theme.
+        pattern = re.compile(re.escape(safe_keyword), re.IGNORECASE)
+        highlighted = pattern.sub(
+            lambda m: f'<span style="background-color:#FFD700; color:#000000; border-radius:3px; padding:0px 2px;">{m.group()}</span>',
+            safe_text
+        )
+        return highlighted
 
     def on_item_changed(self, item, column):
         """Handle item renaming."""
@@ -421,7 +809,7 @@ class SidebarWidget(QWidget):
                     self.folder_selected.emit(new_text)
 
     def delete_selected_folder(self):
-        """Deletes/Removes a folder (moves notes to General)."""
+        """Deletes/Removes a folder with options."""
         item = self.tree.currentItem()
         if not item: return
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -432,18 +820,41 @@ class SidebarWidget(QWidget):
             QMessageBox.warning(self, "Warning", "Cannot delete 'General' folder.")
             return
 
-        confirm = QMessageBox.question(self, "Delete Folder", 
-                                       f"Delete folder '{folder_name}'?\nNotes will be moved to 'General'.",
+        # Improved Dialog with choices
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Delete Folder")
+        msg.setText(f"How do you want to delete folder '{folder_name}'?")
+        msg.setIcon(QMessageBox.Icon.Question)
+        
+        move_btn = msg.addButton("Move notes to General", QMessageBox.ButtonRole.ActionRole)
+        delete_btn = msg.addButton("Delete folder and all notes", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = msg.addButton(QMessageBox.StandardButton.Cancel)
+        
+        msg.exec()
+        
+        if msg.clickedButton() == move_btn:
+            if self.note_service.rename_folder(folder_name, "General"):
+                self.note_service.save_to_disk()
+                self.refresh_tree()
+        elif msg.clickedButton() == delete_btn:
+            self.delete_all_notes_in_folder(folder_name)
+            # Folder will be empty, NoteService doesn't track folders separately, 
+            # so it disappears on next refresh if no notes exist.
+            self.refresh_tree()
+
+    def delete_all_notes_in_folder(self, folder_name):
+        """Bulk deletes all notes in a folder."""
+        confirm = QMessageBox.question(self, "Delete All Notes", 
+                                       f"Are you sure you want to delete all notes in '{folder_name}'?\nThis cannot be undone.",
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if confirm == QMessageBox.StandardButton.Yes:
-            # Logic: Update all notes in this folder to "General"
-            # Since NoteService doesn't have delete_folder, we do it manually or add it.
-            # We implemented rename_folder, let's use rename_folder to move to General?
-            # Actually, renaming to General merges them.
-            if self.note_service.rename_folder(folder_name, "General"):
-                self.note_service.save_to_disk()
-                self.refresh_tree() # Moving to General is complex to animate, easiest to refresh
+            deleted_ids = self.note_service.delete_notes_in_folder(folder_name)
+            for obj_name in deleted_ids:
+                self.note_deleted.emit(obj_name)
+            
+            self.note_service.save_to_disk()
+            self.refresh_tree()
 
 
                 
@@ -457,14 +868,23 @@ class SidebarWidget(QWidget):
         return groups
 
     def on_item_clicked(self, item, column):
-        """Handle single click to open note or browser."""
+        """Handle single click to open note or browser. Ignore if multi-selecting."""
+        # Senior Fix: If Ctrl or Shift is held, we are doing a multi-selection for batch operations.
+        # Don't trigger a note load which would steal focus and break the selection flow.
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+            return
+
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if not data: return
         
         if data.get("type") == "note":
             self.note_selected.emit(data["obj_name"])
         elif data.get("type") == "snippet":
-            self.note_selected.emit(data["obj_name"])
+            # Pass the search query and line number for highlighting
+            query = self.search_bar.text().strip()
+            line = data.get("line", 0)
+            self.search_result_picked.emit(data["obj_name"], query, line)
         elif data.get("type") == "browser":
             self._focus_browser_dock(data["obj_name"])
 
@@ -604,6 +1024,13 @@ class SidebarWidget(QWidget):
         note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
         
         folder_item.setExpanded(True)
+        
+        # Update folder count text
+        self.tree.blockSignals(True)
+        current_count = folder_item.childCount()
+        folder_item.setText(0, f"{target_folder} ({current_count})")
+        self.tree.blockSignals(False)
+
         self.tree.setCurrentItem(note_item)
         self.note_selected.emit(note_data["obj_name"]) # Open it
 
@@ -639,8 +1066,10 @@ class SidebarWidget(QWidget):
                 add_note_act.triggered.connect(lambda: self.add_new_note(folder=data.get("name")))
                 menu.addAction(add_note_act)
                 
+                menu.addSeparator()
+                
                 if data.get("name") != "General":
-                    icon_path = os.path.join(base_icon_path, "theme.svg") # Reuse theme for rename or a text icon
+                    icon_path = os.path.join(base_icon_path, "rename.svg")
                     rename_act = QAction(QIcon(icon_path), "Rename Folder", self)
                     rename_act.triggered.connect(lambda: self.tree.editItem(item, 0))
                     menu.addAction(rename_act)
@@ -649,6 +1078,10 @@ class SidebarWidget(QWidget):
                     delete_act = QAction(QIcon(icon_path), "Delete Folder", self)
                     delete_act.triggered.connect(self.delete_selected_folder)
                     menu.addAction(delete_act)
+                    
+                    delete_notes_act = QAction(QIcon(icon_path), "Delete All Notes in Folder", self)
+                    delete_notes_act.triggered.connect(lambda: self.delete_all_notes_in_folder(data.get("name")))
+                    menu.addAction(delete_notes_act)
             
             elif item_type == "note":
                 icon_path = os.path.join(base_icon_path, "note.svg")
@@ -656,12 +1089,25 @@ class SidebarWidget(QWidget):
                 open_act.triggered.connect(lambda: self.note_selected.emit(data["obj_name"]))
                 menu.addAction(open_act)
                 
-                icon_path = os.path.join(base_icon_path, "theme.svg")
+                icon_path = os.path.join(base_icon_path, "rename.svg")
                 rename_act = QAction(QIcon(icon_path), "Rename", self)
                 rename_act.triggered.connect(lambda: self.tree.editItem(item, 0))
                 menu.addAction(rename_act)
                 
-                # Removed 'Move to...' menu per user request
+                menu.addSeparator()
+                
+                # Pin/Unpin Action
+                obj_name = data["obj_name"]
+                note = self.note_service.get_note_by_id(obj_name)
+                is_pinned = note.get("is_pinned", False) if note else False
+                
+                pin_text = "Unpin Note" if is_pinned else "Pin Note"
+                pin_icon = QIcon(os.path.join(base_icon_path, "pin.svg"))
+                pin_act = QAction(pin_icon, pin_text, self)
+                pin_act.triggered.connect(lambda: self.toggle_note_pin(obj_name))
+                menu.addAction(pin_act)
+                
+                menu.addSeparator()
                         
                 icon_path = os.path.join(base_icon_path, "trash.svg")
                 delete_act = QAction(QIcon(icon_path), "Delete Note", self)
@@ -674,7 +1120,7 @@ class SidebarWidget(QWidget):
                 open_act.triggered.connect(lambda: self._focus_browser_dock(data["obj_name"]))
                 menu.addAction(open_act)
 
-                icon_path = os.path.join(base_icon_path, "theme.svg")
+                icon_path = os.path.join(base_icon_path, "rename.svg")
                 rename_act = QAction(QIcon(icon_path), "Rename", self)
                 rename_act.triggered.connect(lambda: self._rename_browser_dock(data["obj_name"]))
                 menu.addAction(rename_act)
@@ -699,3 +1145,9 @@ class SidebarWidget(QWidget):
         if self.note_service.move_note(note_obj_name, new_folder):
             self.note_service.save_to_disk()
             self.refresh_tree() # Menu move logic requires refresh as we don't know item location easily
+
+    def toggle_note_pin(self, obj_name):
+        """Helper to toggle pin status and refresh UI."""
+        self.note_service.toggle_pin(obj_name)
+        self.note_service.save_to_disk()
+        self.refresh_tree()

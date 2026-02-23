@@ -52,8 +52,10 @@ class StatusBarManager:
             col = cursor.columnNumber() + 1
             self.status_pos_label.setText(f"Ln {line}, Col {col}")
 
-            text = self.mw.active_pane.toPlainText()
-            self.status_char_label.setText(f"{len(text)} characters")
+            # Performance optimization: extraction of character count without full string copy
+            doc = self.mw.active_pane.document()
+            count = doc.characterCount() - 1 # QTextDocument appends a trailing block char
+            self.status_char_label.setText(f"{max(0, count)} characters")
 
         except RuntimeError:
             self.mw.active_pane = None
