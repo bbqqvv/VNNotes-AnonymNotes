@@ -24,7 +24,16 @@ Manage multiple interview questions, research papers, and scripts simultaneously
 ### 4. ⚡ Integrated Research Hub (Ultra-Hub)
 A modular command center that integrates a **Mini Browser** and **Smart Clipboard** with Auto-Paste. Look up real-time info and paste complex answers directly into your workflow without switching windows.
 
-### 5. 🔒 Standalone Private Vault
+### 5. 🪟 Advanced Split View Workspace
+Instantly divide your screen into multiple panels. Use the intuitive **Split Right** and **Split Down** toolbar buttons (or `Ctrl + \` for quick side-by-side splitting) to view notes, scripts, and research materials simultaneously without juggling windows.
+
+### 6. 📌 Always on Top & Quick Switcher
+Never lose your notes behind other windows with the explicit "**Always on Top**" toggle. Need to jump between scripts? Hit `Ctrl + P` to instantly open the floating **Quick Switcher** and fuzzy-search through all your active notes.
+
+### 7. ✨ Smart Auto-Formatting
+Type at the speed of thought. Start a line with `- ` and watch it instantly auto-format into a clean, professional bulleted list, keeping your meeting notes structured without ever reaching for the toolbar.
+
+### 8. 🔒 Standalone Private Vault
 Zero cloud, zero tracking, zero logs. A military-grade local storage philosophy ensuring your high-stakes meeting notes and sensitive documents stay exclusively on your machine.
 
 ---
@@ -76,7 +85,9 @@ python tools/build_installer.py
 | Shortcut | Function |
 | :--- | :--- |
 | `Ctrl + N` | Create new note/tab |
+| `Ctrl + P` | Open Quick Switcher (Fuzzy Note Search) |
 | `Ctrl + F` | Search within active document |
+| `Ctrl + \` | Split active note into new Right Pane |
 | `Ctrl + Alt + S` | Toggle Phantom Mode (Stealth) |
 | `Ctrl + Alt + T` | Toggle Always on Top |
 | `Double-Click Image` | Precision image resizing |
