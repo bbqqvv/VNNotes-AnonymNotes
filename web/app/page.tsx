@@ -43,7 +43,7 @@ export default function Home() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            v2.0.0 Stable is now live.
+            v2.0.1 is now live.
           </motion.div>
 
           <motion.h1
@@ -165,7 +165,7 @@ export default function Home() {
             className="inline-flex items-center gap-2 bg-emerald-600 text-white px-8 py-4 rounded-full font-bold hover:bg-emerald-500 transition-all hover:scale-105 shadow-lg shadow-emerald-500/20"
           >
             <Download className="w-5 h-5" />
-            Download v2.0.0
+            Download v2.0.1
           </Link>
           <p className="mt-6 text-sm text-neutral-600">
             Windows 10/11 • 64-bit • Installer (~121MB)
