@@ -6,7 +6,7 @@
 #define MyAppPublisher "VTech Digital Solution"
 #define MyAppURL "https://github.com/bbqqvv/VNNotes"
 #define MyAppExeName "VNNotes.exe"
-#define MyAppId "vtech.vnnotes.stable.v2"
+#define MyAppId "vtech.vnnotes.stable.v3"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.

@@ -96,11 +96,26 @@ class StealthEventFilter(QObject):
                 StealthManager.apply_to_all_windows(app, True)
 
     def eventFilter(self, obj, event):
-        if self.enabled and event.type() == QEvent.Type.Show:
-            if isinstance(obj, QWidget) and obj.isWindow():
-                # Apply stealth mode to the new window
-                hwnd = int(obj.winId())
-                if hwnd:
-                    # logging.debug(f"StealthEventFilter: Applying stealth to new window {obj} (HWND {hwnd})")
-                    StealthManager.set_stealth_mode(hwnd, True)
+        # Plan v4: Lifecycle & Re-entrancy Guards
+        # 1. Broad guard for deleted/zombie objects
+        try:
+            if not self.enabled:
+                return super().eventFilter(obj, event)
+
+            if event.type() == QEvent.Type.Show:
+                # 2. Check if object still exists and IS a window
+                if isinstance(obj, QWidget) and obj.isWindow():
+                    # 3. Check for valid winId (Qt may return 0/None for closing widgets)
+                    hwnd = int(obj.winId())
+                    if hwnd:
+                        # 4. Apply stealth (StealthManager has its own internals/guards)
+                        StealthManager.set_stealth_mode(hwnd, True)
+        except (RuntimeError, AttributeError, ValueError):
+            # Object deleted mid-filter or invalid winId
+            pass
+        except Exception as e:
+            # Prevent exception noise during shutdown
+            if "KeyboardInterrupt" not in str(e):
+                logging.debug(f"Stealth Filter Info: {e}")
+            
         return super().eventFilter(obj, event)

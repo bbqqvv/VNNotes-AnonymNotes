@@ -250,6 +250,17 @@ class ThemeManager:
                 margin: 2px 4px;
             }}
             
+            /* Plan v10.1: Specialized Compact Editor for Rename/Item editing */
+            QAbstractItemView QLineEdit {{
+                padding: 0px 2px;
+                margin: 0px;
+                border: 1px solid {c['accent']};
+                border-radius: 2px;
+                background: {c['surface']};
+                color: {c['text']};
+                selection-background-color: {c['accent']};
+            }}
+            
             QTextEdit, NotePane {{ 
                 background: {c['bg']}; 
                 color: {c['text']}; 
@@ -336,7 +347,7 @@ class ThemeManager:
                 font-size: 9pt;
             }}
             QTreeWidget::item {{
-                padding: 3px 6px;
+                padding: 5px 6px;
                 border-radius: 4px;
                 margin: 1px 0px;
             }}
@@ -439,6 +450,11 @@ class ThemeManager:
             QTabBar::close-button {{
                 image: url("{close_icon_url}");
                 subcontrol-position: right;
+                border-radius: 4px;
+                padding: 1px;
+            }}
+            QTabBar::close-button:hover {{
+                background-color: {c['hover']};
             }}
             
             QScrollBar:vertical {{

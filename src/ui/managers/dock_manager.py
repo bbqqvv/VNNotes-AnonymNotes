@@ -42,7 +42,7 @@ class DockManager:
         note_pane = NotePane(zoom=zoom)
         note_pane.setObjectName(obj_name) # CRITICAL for Zero-Lag sync
         note_pane.file_path = file_path
-        if content:
+        if content is not None:
             # CORRECT: Use the manager's setter instead of setting on the editor directly
             note_pane.paging_engine.set_deferred_content(content)
         
@@ -56,6 +56,10 @@ class DockManager:
         
         # ROOT CAUSE FIX: Register signals BEFORE adding to layout or showing.
         self._register_dock(dock)
+        
+        # DIAMOND-STANDARD: Ensure that if `showEvent` is swallowed by QTabWidget during restoration
+        # or manual tab-switching, `visibilityChanged` acts as a fail-safe lazy-load trigger.
+        dock.visibilityChanged.connect(lambda visible: note_pane.load_deferred_content() if visible else None)
         
         # Tabification logic - Skip during restoration (restoreState handles it)
         if not self.main_window._is_restoring:
@@ -173,6 +177,8 @@ class DockManager:
         dock.setWidget(clipboard_pane)
         self._register_dock(dock)
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        # Identity Tagging
+        self._update_dock_identity(dock)
         return dock
 
     def _register_dock(self, dock):
@@ -182,6 +188,9 @@ class DockManager:
         if hasattr(self.main_window, 'check_docks_closed'):
             dock.visibilityChanged.connect(lambda _: self.main_window.check_docks_closed())
         
+        # Identity Tagging (Plan v5)
+        self._update_dock_identity(dock)
+        
         # Connection for destroyed to cleanup registry, sidebar and MainWindow cache
         dock.destroyed.connect(lambda obj: self._on_dock_destroyed(obj))
         if hasattr(self.main_window, 'on_dock_destroyed'):
@@ -189,17 +198,28 @@ class DockManager:
         
         # Re-trigger tab bar hook (single-shot timer) when dock layout changes
         if hasattr(self.main_window, 'tab_hook_timer'):
-            self.main_window.tab_hook_timer.start(200)
+            self.main_window.tab_hook_timer.start(1500)
 
     def _update_dock_title(self, dock, title):
         if not title: return
         dock.setWindowTitle(title)
-        dock.setToolTip(title)
+        # Identity-Aware ToolTip: Combine Title + hidden ID (Plan v5)
+        self._update_dock_identity(dock, title)
         
         if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
             try:
                 self.main_window.sidebar.refresh_tree()
             except RuntimeError: pass
+
+    def _update_dock_identity(self, dock, title=None):
+        """Plan v5: Embeds the objectName into the ToolTip for 100% accurate tab lookup."""
+        try:
+            actual_title = title or dock.windowTitle()
+            obj_name = dock.objectName()
+            # Identity format: "Title [ID: name]"
+            # Using brackets/prefix makes it easy for TabManager to regex/split
+            dock.setToolTip(f"{actual_title} [ID: {obj_name}]")
+        except RuntimeError: pass
 
     def _on_dock_destroyed(self, dock):
         # Clean up registry
@@ -250,13 +270,40 @@ class DockManager:
         return [d for d in self.get_all_content_docks() if d.objectName().startswith("BrowserDock_")]
 
     def close_all_notes(self):
-        for dock in list(self.get_note_docks()):
-            dock.close()
+        try:
+            for dock in list(self.get_note_docks()):
+                if hasattr(self.main_window, 'tab_manager'):
+                    self.main_window.tab_manager._close_specific_dock(dock, skip_save=True)
+                else:
+                    dock.close()
+            if hasattr(self.main_window, 'save_app_state'): self.main_window.save_app_state()
+        except Exception: pass
+            
+        if hasattr(self.main_window, 'update_branding_visibility'): 
+            self.main_window.update_branding_visibility(immediate=True)
 
     def close_all_browsers(self):
-        for dock in list(self.get_browser_docks()):
-            dock.close()
+        try:
+            for dock in list(self.get_browser_docks()):
+                if hasattr(self.main_window, 'tab_manager'):
+                    self.main_window.tab_manager._close_specific_dock(dock, skip_save=True)
+                else:
+                    dock.close()
+            if hasattr(self.main_window, 'save_app_state'): self.main_window.save_app_state()
+        except Exception: pass
+            
+        if hasattr(self.main_window, 'update_branding_visibility'): 
+            self.main_window.update_branding_visibility(immediate=True)
 
     def close_all_docks(self):
-        for dock in list(self.get_all_content_docks()):
-            dock.close()
+        try:
+            for dock in list(self.get_all_content_docks()):
+                if hasattr(self.main_window, 'tab_manager'):
+                    self.main_window.tab_manager._close_specific_dock(dock, skip_save=True)
+                else:
+                    dock.close()
+            if hasattr(self.main_window, 'save_app_state'): self.main_window.save_app_state()
+        except Exception: pass
+            
+        if hasattr(self.main_window, 'update_branding_visibility'): 
+            self.main_window.update_branding_visibility(immediate=True)

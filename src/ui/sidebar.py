@@ -161,11 +161,11 @@ class SidebarWidget(QWidget):
         self._last_search_results = None  # Cache search results for theme changes
         
         # SENIOR MEMORY: Load last stable width from config
-        self._last_stable_width = self.main_window.config.get_value("window/sidebar_width", 300)
+        self._last_stable_width = self.main_window.config.get_value("window/sidebar_width", 250)
         try:
             self._last_stable_width = int(self._last_stable_width)
         except (ValueError, TypeError):
-            self._last_stable_width = 600
+            self._last_stable_width = 250
         
         # Senior Magnet: Snapping & Release Detection
         self._is_snapping = False
@@ -283,24 +283,35 @@ class SidebarWidget(QWidget):
         if self.tree.viewport():
             self.tree.viewport().update()
 
+    def restore_stable_width(self):
+        """Forcefully resets the sidebar to its last known good width."""
+        try:
+            sd = getattr(self.main_window, 'sidebar_dock', None)
+            if sd and hasattr(self, '_last_stable_width'):
+                target_w = int(self._last_stable_width)
+                # HARD PIN: Temporarily allow any size to ensure the snap works
+                sd.setMinimumWidth(0)
+                self.main_window.resizeDocks([sd], [target_w], Qt.Orientation.Horizontal)
+                # Restore standard minimum after snap
+                if target_w >= 180:
+                    sd.setMinimumWidth(80)
+                    logging.debug(f"Sidebar: Forcefully restored to stable width: {target_w}px")
+        except Exception as e:
+            logging.error(f"Sidebar: restore_stable_width failed: {e}")
+
     def resizeEvent(self, event):
-        """Auto-collapse sidebar if it becomes too narrow to show icons properly."""
+        """Standard resize handling with strict persistence rules."""
         try:
             super().resizeEvent(event)
-        except Exception as e:
-            logging.error(f"Sidebar: resizeEvent super failed: {e}")
-            return
+        except Exception: return
         
         current_width = event.size().width()
 
-        if self.main_window._is_restoring:
+        # Guard against recursive resize calls or invalid states
+        if self._in_resize_logic or self.main_window._is_restoring or self._is_snapping:
             return
-
-        # Guard against recursive resize calls from magnet snap
-        if self._in_resize_logic:
-            return
+            
         self._in_resize_logic = True
-        
         try:
             is_dragging = QApplication.mouseButtons() & Qt.MouseButton.LeftButton
             sd = getattr(self.main_window, 'sidebar_dock', None)
@@ -308,36 +319,28 @@ class SidebarWidget(QWidget):
             if is_dragging:
                 if sd:
                     if current_width < 180:
-                        # 1. Visual Snap (The "Hít" Feel): Use resizeDocks to drop width to 0 
+                        # 1. Visual Snap (The "Hít" Feel)
                         if not self._pending_collapse:
                             self._pending_collapse = True
-                            logging.info(f"Sidebar: Snap threshold reached. Buffering width: {self._last_stable_width}px")
                             sd.setMinimumWidth(0)
-                        
-                        # Command the layout engine to collapse visually
                         self.main_window.resizeDocks([sd], [0], Qt.Orientation.Horizontal)
                         
-                        # Activate the hardware-level mouse release watchdog
                         if hasattr(self.main_window, '_sidebar_watchdog') and not self.main_window._sidebar_watchdog.isActive():
                             self.main_window._sidebar_watchdog.start()
-                        return 
+                        return
                             
                     elif current_width >= 180:
-                        # 2. Memory Persistence: Update stable width in RAM ONLY during drag
+                        # 2. Manual Update: Only learn new width during ACTIVE drag
                         self._last_stable_width = current_width
+                        self.main_window.config.set_value("window/sidebar_width", current_width)
                         
-                        # Reclamation: Dragged back out of the danger zone
                         if self._pending_collapse:
                             self._pending_collapse = False
-                            logging.debug(f"Sidebar: Dragged back to {current_width}px. Collapse aborted.")
                             sd.setMinimumWidth(80)
                             sd.setMaximumWidth(600)
             else:
-                # NOT dragging (window resize or programmatic resize). 
+                # 3. Passive Resize: Ignore for configuration, reset pending flags
                 self._pending_collapse = False
-                if current_width >= 180:
-                    self._last_stable_width = current_width
-                    self.main_window.config.set_value("window/sidebar_width", current_width)
         finally:
             self._in_resize_logic = False
 

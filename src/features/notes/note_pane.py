@@ -28,8 +28,8 @@ class NotePane(QTextEdit):
         self._current_url_highlight: "tuple[int, int] | None" = None 
         self._is_dirty = False # Track if user has modified the content
         
-        # Managers
-        self.paging_engine = NotePagingEngine(self, page_size=100000)
+        # Managers (Plan v12.3: Reduced page size to 250KB for better performance)
+        self.paging_engine = NotePagingEngine(self, page_size=250000)
         self.image_manager = NoteImageManager(self)
         
         self.textChanged.connect(self._on_content_modified)
@@ -175,10 +175,13 @@ class NotePane(QTextEdit):
 
     def set_zoom(self, val):
         self._zoom_factor = val
-        self._apply_zoom()
+        self._apply_zoom(force_full_refresh=True)
 
-    def _apply_zoom(self, force_full_refresh=True):
-        """Calculates and applies font size. Optimizes by avoiding full-document refresh if possible."""
+    def _apply_zoom(self, force_full_refresh=False):
+        """
+        Calculates and applies font size. 
+        Plan v12.3: Made refresh optional and added byte-size safety guard.
+        """
         # Ensure _base_font_size is sane
         base_size = self._base_font_size if self._base_font_size > 0 else 13.0
         new_size = max(1.0, base_size * (self._zoom_factor / 100.0))
@@ -187,7 +190,7 @@ class NotePane(QTextEdit):
             logging.error(f"NotePane: INVALID font size calculated: {new_size} (zoom={self._zoom_factor}, base={base_size})")
             new_size = 13.0
         
-        # 1. Update the document's default font (low cost, ensures new text/pastes have correct size)
+        # 1. Update the document's default font (low cost, handles new text)
         doc = self.document()
         doc_font = doc.defaultFont()
         doc_font.setPointSizeF(new_size)
@@ -201,7 +204,13 @@ class NotePane(QTextEdit):
         if not force_full_refresh:
             return
 
-        # 3. Full Document Refresh (High cost, only do on manual zoom change)
+        # 3. SAFETY GUARD: If document is massive (> 500k characters), do NOT do full refresh
+        # Plan v12.3: Use O(1) characterCount() instead of O(N) toHtml() which crashes.
+        if doc.characterCount() > 500000:
+            logging.warning("NotePane: Document too large for full zoom refresh. Skipping deep format.")
+            return
+
+        # 4. Full Document Refresh (High cost)
         self.blockSignals(True)
         try:
             curr_cursor = self.textCursor()
@@ -321,13 +330,18 @@ class NotePane(QTextEdit):
 
     def append_html_chunk(self, html):
         """Helper for PagingEngine to append content."""
+        # Plan v12.3: Block scroll signals to prevent recursive loading loops
+        self.verticalScrollBar().blockSignals(True)
         self.blockSignals(True)
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(html)
-        # Apply the current zoom level to the document default ensuring the chunk matches
-        self._apply_zoom(force_full_refresh=False) 
-        self.blockSignals(False)
+        try:
+            cursor = self.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.insertHtml(html)
+            # Apply the current zoom level to the document default ensuring the chunk matches
+            self._apply_zoom(force_full_refresh=False) 
+        finally:
+            self.blockSignals(False)
+            self.verticalScrollBar().blockSignals(False)
         self._is_dirty = False
 
     def load_deferred_content(self):
@@ -347,7 +361,7 @@ class NotePane(QTextEdit):
 
         processed = self.image_manager.process_html_for_insertion(html)
         self.paging_engine.set_content(processed)
-        self._apply_zoom()
+        self._apply_zoom(force_full_refresh=False) # Plan v12.3: Avoid expensive refresh on load
         self._is_dirty = False
         
     def highlight_search_result(self, query, line_number=0):
@@ -464,8 +478,34 @@ class NotePane(QTextEdit):
     # --- Search Buffer ---
 
     def get_total_matches(self, text, case_sensitive=False, whole_words=False):
-        """Returns total matches in the document using PagingEngine's optimized counter."""
+        """
+        Returns total matches in the document. 
+        Plan v12.1: Optimized live search vs. buffer search.
+        """
         if not text: return 0
+        
+        # 1. If document is small/fully loaded, use LIVE editor content (always accurate/up-to-date)
+        if not self.paging_engine.is_paged() or self.paging_engine.is_fully_loaded():
+            content = self.toPlainText()
+            flags = 0
+            if not case_sensitive:
+                flags = re.IGNORECASE
+            
+            pattern_str = re.escape(text)
+            if whole_words:
+                pattern_str = rf"\b{pattern_str}\b"
+            
+            try:
+                # Plan v12.2: Use generator expression with sum() for O(1) space counting
+                return sum(1 for _ in re.finditer(pattern_str, content, flags=flags))
+            except:
+                # Fallback to simple count if regex fails (though re.escape should prevent it)
+                if not case_sensitive:
+                    content = content.lower()
+                    text = text.lower()
+                return content.count(text)
+        
+        # 2. For massive paged documents, fallback to the background HTML buffer
         return self.paging_engine.count_occurrences(text, case_sensitive, whole_words)
 
     def find_global(self, text, backward=False, case_sensitive=False, whole_words=False):

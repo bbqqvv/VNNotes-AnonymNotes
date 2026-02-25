@@ -65,3 +65,9 @@ tools/diag_paths.py
 tools/inject_perf_notes.py
 tools/ui_inspector.py
 tools/reset_app.py
+
+# Trace and debug
+trace_*.py
+branding_test_output.png
+temp_indent.txt
+appnote.png

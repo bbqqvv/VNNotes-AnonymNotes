@@ -12,8 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor, QColor, QPixmap, QPainter
 from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray, QPoint, QEvent
-from PyQt6 import QtCore
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6 import QtCore, sip
 
 
 
@@ -46,6 +45,9 @@ from src.ui.managers.theme_manager import ThemeManager
 from src.ui.quick_switcher import QuickSwitcher
 
 class MainWindow(QMainWindow):
+    # Plan v6: Layout Limits (User requested 8-10 capacity)
+    MAX_SPLIT_NOTES = 10
+
     def __init__(self):
         super().__init__()
         self.ctx = ServiceContext.get_instance()
@@ -72,9 +74,11 @@ class MainWindow(QMainWindow):
         self.theme_manager = ThemeManager(self, self.config, self.base_path)
         self.session_manager = SessionManager(self, self.ctx)
         self.clipboard_manager = ClipboardManager()
-        self._is_restoring = False
-        self._active_dock = None 
         self.status_bar_manager = StatusBarManager(self)
+        self._active_dock = None 
+        
+        # Core state
+        self._is_restoring = False
         
         # RESTORED INITIALIZATION CALL
         self.late_init()
@@ -121,7 +125,7 @@ class MainWindow(QMainWindow):
         self.tab_hook_timer = QTimer(self)
         self.tab_hook_timer.setSingleShot(True)
         self.tab_hook_timer.timeout.connect(self.hook_tab_bars)
-        self.tab_hook_timer.start(500)  # Initial hook after setup
+        self.tab_hook_timer.start(1500)  # Initial hook after setup
         
         # Signal Debouncing (Phase 3: Realtime UI Sync)
         # 1. UI-Only Sync (Title/Sidebar): High frequency (100ms) for "Realtime" feel
@@ -133,6 +137,11 @@ class MainWindow(QMainWindow):
         self._content_change_timer = QTimer(self)
         self._content_change_timer.setSingleShot(True)
         self._content_change_timer.timeout.connect(self._do_on_content_changed)
+        
+        # 3. Branding Guard: Debounce visibility checks to prevent layout recursion "BÙM"
+        self._branding_timer = QTimer(self)
+        self._branding_timer.setSingleShot(True)
+        self._branding_timer.timeout.connect(self._do_update_branding_visibility)
         
         # Status bar updates are now signal-driven (connected in set_active_pane)
         # No polling timer needed — cursorPositionChanged fires on every keystroke/click
@@ -203,11 +212,13 @@ class MainWindow(QMainWindow):
             self.setWindowState(Qt.WindowState.WindowMaximized)
         elif self.width() < 300 or self.height() < 300:
             self.resize(1280, 800)
-            self.setDockNestingEnabled(True)
+
+        self.setDockNestingEnabled(True) # Enable manual Drag-to-Split
         self.setDocumentMode(True) # Senior Fix: Eliminates native padding/gap around docked tabs
         self.setDockOptions(QMainWindow.DockOption.AllowTabbedDocks | 
                            QMainWindow.DockOption.AnimatedDocks |
-                           QMainWindow.DockOption.GroupedDragging)
+                           QMainWindow.DockOption.GroupedDragging |
+                           QMainWindow.DockOption.AllowNestedDocks)
         
         # Top Tabs (IDE Standard) — apply to L/R areas only to prevent mask crashes
         for area in [Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea]:
@@ -237,14 +248,6 @@ class MainWindow(QMainWindow):
         self.central_stack.addWidget(self.collapse_widget)
         
         self.central_stack.setCurrentIndex(0)
-        
-        # 1.5 Flush-Left Snap Indicator (VSCode Style)
-        # Global indicator that appears at the absolute left edge when sidebar is collapsed.
-        self.snap_indicator = QFrame(self)
-        self.snap_indicator.setObjectName("GlobalSnapIndicator")
-        self.snap_indicator.setFixedWidth(2)
-        self.snap_indicator.setStyleSheet("background-color: #007ACC;")
-        self.snap_indicator.hide()
         
         # 2. Sidebar Setup
         self.sidebar = SidebarWidget(self.note_service, self)
@@ -311,21 +314,12 @@ class MainWindow(QMainWindow):
         # Sequence-based settling: Windows 11 maximization takes time to settle geometry.
         # One pass at 200ms is standard for DWM settlement.
         QTimer.singleShot(200, self._stabilize_layout)
-        
-        # Update snap indicator geometry
-        self._update_snap_indicator_geometry()
 
     def resizeEvent(self, event):
-        """Handle window resizing to keep indicators flush."""
+        """Handle window resizing."""
         super().resizeEvent(event)
-        self._update_snap_indicator_geometry()
 
-    def _update_snap_indicator_geometry(self):
-        """Keep the snap indicator flush with the left edge and full height."""
-        if hasattr(self, 'snap_indicator'):
-            self.snap_indicator.setGeometry(0, 0, 2, self.height())
-            self.snap_indicator.raise_()
-        # Removed infinite layout loop here
+        # Removed snap indicator geometry update logic here
 
     def _stabilize_layout(self):
         """Forces a full layout refresh and synchronizes geometry."""
@@ -484,13 +478,7 @@ class MainWindow(QMainWindow):
             self.sidebar_dock.setMinimumWidth(0)
             self.sidebar_dock.setMaximumWidth(0)
             self.sidebar.updateGeometry()
-            
-            if hasattr(self, 'snap_indicator'):
-                self.snap_indicator.show()
         else:
-            if hasattr(self, 'snap_indicator'):
-                self.snap_indicator.hide() 
-                
             self.sidebar_dock.setMaximumWidth(600)
             
             # Senior Pivot: Use the exact buffered width. No arbitrary floors.
@@ -521,35 +509,80 @@ class MainWindow(QMainWindow):
             self.sidebar.updateGeometry()
 
     # Branding and Visibility Management
-    def update_branding_visibility(self):
-        """Show branding only when no docks are visible."""
-        # Clean list and check for visible docks
-        visible_docks = []
-        
-        for dock in self.findChildren(QDockWidget):
-            try:
-                # Skip Sidebar and check visibility
-                if dock.objectName() == "SidebarDock":
-                    continue
-                    
-                if dock.isVisible():
-                    visible_docks.append(dock)
-            except RuntimeError:
-                pass
-        
-        logging.debug(f"Branding Check: {len(visible_docks)} visible docks.")
-        
-        if visible_docks:
-            # Hide the central widget completely
-            if self.central_stack.isVisible():
-                self.central_stack.setVisible(False)
-        else:
-            # Return to Branding splash
+    def update_branding_visibility(self, immediate=False):
+        """Triggers a branding check. If immediate is True, bypasses the debounce timer."""
+        if immediate:
+            self._do_update_branding_visibility()
+            return
+            
+        if hasattr(self, '_branding_timer'):
+            self._branding_timer.start(100)
+
+    def _do_update_branding_visibility(self):
+        """Diamond-Standard (Plan v8.6): Strict Database-Driven Pinning."""
+        try:
+            # Plan v4: Check if any docks EXIST in the registry
+            if hasattr(self, 'dock_manager'):
+                docks = self.dock_manager.get_all_content_docks()
+                
+                if docks:
+                     # CONTENT EXISTS: Hide branding and RELEASE sidebar constraints
+                     if self.central_stack.isVisible():
+                         # Plan v8.11: Zeta Strategy - Atomic Silence.
+                         if hasattr(self, 'branding') and self.branding:
+                             self.branding.is_suppressed = True
+
+                         # Plan v8.9: Atomic Transition. Freeze visuals and lock BEFORE visibility change.
+                         self.setUpdatesEnabled(False)
+                         try:
+                             if self.sidebar_dock:
+                                 target_w = 250
+                                 if hasattr(self, 'sidebar') and hasattr(self.sidebar, '_last_stable_width'):
+                                     target_w = self.sidebar._last_stable_width
+                                 
+                                 # Lock FIRST
+                                 self.sidebar_dock.setFixedWidth(int(target_w))
+                                 
+                                 from PyQt6.QtCore import QTimer
+                                 def release_lock():
+                                     if not sip.isdeleted(self) and self.sidebar_dock and not sip.isdeleted(self.sidebar_dock):
+                                         self.sidebar_dock.setMinimumWidth(80)
+                                         self.sidebar_dock.setMaximumWidth(600)
+                                 
+                                 QTimer.singleShot(500, release_lock)
+
+                             # Hide central area completely to let docks expand to center
+                             self.central_stack.setVisible(False)
+                         finally:
+                             self.setUpdatesEnabled(True)
+                     return
+
+            # WORKSPACE EMPTY: Show branding and APPLY "Hard Pin"
+            target_w = 250
+            if hasattr(self, 'sidebar') and hasattr(self.sidebar, '_last_stable_width'):
+                target_w = self.sidebar._last_stable_width
+            
+            # Physical enforcement: The sidebar CANNOT grow beyond its saved width when empty.
+            if self.sidebar_dock:
+                self.sidebar_dock.setMaximumWidth(int(target_w))
+                # Ensure it actually occupies that space
+                self.resizeDocks([self.sidebar_dock], [int(target_w)], Qt.Orientation.Horizontal)
+
+            # Plan v8.11: Restore logo visibility when returning to empty state
+            if hasattr(self, 'branding') and self.branding:
+                self.branding.is_suppressed = False
+
             self.central_stack.setCurrentIndex(0)
             if not self.central_stack.isVisible():
                 self.central_stack.setVisible(True)
+            
             self.branding.updateGeometry()
             self.branding.update()
+        except Exception as e:
+            logging.error(f"Branding Recovery Failed: {e}")
+            self.central_stack.setVisible(True)
+
+
 
     def check_docks_closed(self):
         self.update_branding_visibility()
@@ -564,27 +597,47 @@ class MainWindow(QMainWindow):
     # --- Dock Management ---
 
     def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None, zoom=100):
-        if not obj_name and not self._is_restoring:
-            # New note created by user: Get entity from service first
-            note_data = self.note_service.add_note(title or "New Note", content)
-            obj_name = note_data["obj_name"]
-            title = note_data["title"]
-            # content is already provided
-        elif obj_name and not content:
-            # Reopening an existing note (metadata exists, content might be separate)
-            note_data = self.note_service.get_note_by_id(obj_name)
-            if note_data:
-                title = note_data.get("title", title)
-                content = self.note_service.get_note_content(obj_name)
-            
-        dock = self.dock_manager.add_note_dock(content, title, obj_name, anchor_dock=anchor_dock, file_path=file_path, zoom=zoom)
+        # Plan v8.11: Zeta Strategy - Atomic Synchronized insertion.
+        # Freeze and suppress BEFORE the dock is even created/added to layout.
+        docks_exists = len(self.dock_manager.get_all_content_docks()) > 0
+        
+        if not docks_exists:
+            # Transitioning from Empty -> Content: Pre-emptively suppress branding
+            self.setUpdatesEnabled(False)
+            try:
+                if not obj_name and not self._is_restoring:
+                    # New note created by user: Get entity from service first
+                    note_data = self.note_service.add_note(title or "New Note", content)
+                    obj_name = note_data["obj_name"]
+                    title = note_data["title"]
+                    # content is already provided
+                elif obj_name and not content:
+                    # Reopening an existing note (metadata exists, content might be separate)
+                    note_data = self.note_service.get_note_by_id(obj_name)
+                    if note_data:
+                        title = note_data.get("title", title)
+                        content = self.note_service.get_note_content(obj_name)
 
-        # Organic Fix: Softly nudge the sidebar back to its requested width
-        # after Qt finishes redistributing the space from the hidden central widget.
-        if not self._is_restoring and self.sidebar_dock and self.sidebar_dock.isVisible():
-            target_w = getattr(self.sidebar, '_last_stable_width', 260)
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(50, lambda: self.resizeDocks([self.sidebar_dock], [int(target_w)], Qt.Orientation.Horizontal))
+                # Pre-lock and pre-suppress branding while visual is frozen
+                self._do_update_branding_visibility()
+                
+                # Now insert the dock into the already-prepared layout
+                dock = self.dock_manager.add_note_dock(content, title, obj_name, anchor_dock=anchor_dock, file_path=file_path, zoom=zoom)
+            finally:
+                self.setUpdatesEnabled(True)
+        else:
+            # Standard path if workspace is not empty
+            if not obj_name and not self._is_restoring:
+                note_data = self.note_service.add_note(title or "New Note", content)
+                obj_name = note_data["obj_name"]
+                title = note_data["title"]
+            elif obj_name and not content:
+                note_data = self.note_service.get_note_by_id(obj_name)
+                if note_data:
+                    title = note_data.get("title", title)
+                    content = self.note_service.get_note_content(obj_name)
+            
+            dock = self.dock_manager.add_note_dock(content, title, obj_name, anchor_dock=anchor_dock, file_path=file_path, zoom=zoom)
 
         # Realtime Update for Sidebar (Skip during restoration)
         if not self._is_restoring and self.sidebar:
@@ -601,12 +654,6 @@ class MainWindow(QMainWindow):
             
         dock = self.dock_manager.add_browser_dock(url, anchor_dock=anchor_dock, obj_name=obj_name)
         
-        # Organic Fix: Softly nudge the sidebar back
-        if not self._is_restoring and self.sidebar_dock and self.sidebar_dock.isVisible():
-            target_w = getattr(self.sidebar, '_last_stable_width', 260)
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(50, lambda: self.resizeDocks([self.sidebar_dock], [int(target_w)], Qt.Orientation.Horizontal))
-            
         return dock
 
 
@@ -812,7 +859,9 @@ class MainWindow(QMainWindow):
              first_block = doc.begin()
              first_line = first_block.text().strip()[:30] if first_block.isValid() else ""
              
-             if not first_line: first_line = "Untitled"
+             if not first_line:
+                 # If document is empty, ALWAYS preserve its current explicit title
+                 first_line = dock.windowTitle() or "Untitled"
              
              if dock.windowTitle() != first_line:
                  dock.setWindowTitle(first_line)
@@ -833,23 +882,54 @@ class MainWindow(QMainWindow):
                 self.session_manager.start_autosave()
 
     def on_sidebar_note_selected(self, note_obj_name):
-        """Opens or focuses a note selected from the sidebar."""
+        """Opens or focuses a note selected from the sidebar. (Plan v9.18: Instant suppression)"""
+        # ─── PRE-EMPTIVE SUPPRESSION ───
+        # We hide the branding IMMEDIATELY, before any IO or widget creation
+        if hasattr(self, 'branding') and self.branding:
+            self.branding.is_suppressed = True
+            # Plan v9.2: Force Synchronous repaint BEFORE any layout math or GUI freeze
+            self.branding.repaint()
+
         # Check if already open
         for dock in self.findChildren(QDockWidget):
              if dock.objectName() == note_obj_name:
                  dock.show()
                  dock.raise_()
-                 dock.setFocus()
+                 
+                 # DIAMOND-STANDARD: Force lazy load if `showEvent` was swallowed by QDockWidget tabification
+                 widget = dock.widget()
+                 if hasattr(widget, "load_deferred_content"):
+                     widget.load_deferred_content()
+                 
+                 # Bring the actual text editor into focus so the typing cursor appears!
+                 if widget:
+                     widget.setFocus()
+                 
+                 # Force visibility re-check to prevent BrandyOverlay glitches
+                 self.check_docks_closed()
                  return
         
         # If not open, restore it from Service
         logging.info(f"Restoring closed note: {note_obj_name}")
-        note_data = self.note_service.get_note_by_id(note_obj_name)
-        if note_data:
-            # CORRECT: Call self.add_note_dock which handles distributed storage retrieval
-            self.add_note_dock(content="", title=note_data.get("title", "Untitled"), obj_name=note_obj_name)
-        else:
-            logging.error(f"Could not find note data for {note_obj_name}")
+        
+        # Freeze Visuals BEFORE loading starts (Plan v8.12 guard)
+        self.setUpdatesEnabled(False)
+        try:
+            note_data = self.note_service.get_note_by_id(note_obj_name)
+            if note_data:
+                # CORRECT: Call self.add_note_dock
+                dock = self.add_note_dock(title=note_data.get("title", "Untitled"), obj_name=note_obj_name)
+                if dock:
+                    widget = dock.widget()
+                    if hasattr(widget, "load_deferred_content"):
+                         widget.load_deferred_content()
+                    if widget:
+                         widget.setFocus()
+                self.check_docks_closed()
+            else:
+                logging.error(f"Could not find note data for {note_obj_name}")
+        finally:
+            self.setUpdatesEnabled(True)
 
     def on_search_result_picked(self, obj_name, query, line):
         """Handle search result click: open note, highlight match, scroll to it."""
@@ -952,42 +1032,75 @@ class MainWindow(QMainWindow):
 
 
 
-    # --- Tab Grouping (Split View) ---
-    def split_active_note(self, horizontal=True):
-        """Splits the active note dock into a new group."""
-        active_pane = self.active_pane
-        if not active_pane: return
-        
-        # 1. Find the parent dock of the active pane
-        from PyQt6.QtWidgets import QDockWidget
-        source_dock = None
-        curr = active_pane
-        while curr:
-            if isinstance(curr, QDockWidget):
-                source_dock = curr
-                break
-            curr = curr.parentWidget()
-            
-        if not source_dock: return
-        
-        # 2. Find a neighbor dock (anchor) to split against
-        # We look for another note dock in the same area
-        docks = self.dock_manager.get_note_docks()
-        anchor_dock = None
-        for d in docks:
-            if d != source_dock and d.isVisible():
-                anchor_dock = d
-                break
-        
-        if not anchor_dock:
-            logging.info("Split View: No visible neighbor found. Opening new note to split.")
-            self.on_new_note_triggered()
-            return # User can split again once new note is visible
 
-        # 3. Perform the Split
-        orientation = Qt.Orientation.Horizontal if horizontal else Qt.Orientation.Vertical
-        self.splitDockWidget(anchor_dock, source_dock, orientation)
-        logging.info(f"Split View: Splitting {source_dock.objectName()} against {anchor_dock.objectName()}")
+    def restore_grid_layout(self, focus_dock=None, force_grid=False):
+        """
+        Plan v6.4: Intelligent Grid Restoration.
+        - If multiple areas exist or force_grid=True: Build 2x5 grid.
+        - If only 1 area exists: Consolidate all notes into 1 tab stack (Respect user intent).
+        """
+        logging.info(f"Restoring Grid Layout (v6.4 Area-Aware, force={force_grid})...")
+        visible_notes = [d for d in self.dock_manager.get_note_docks() if d.isVisible()]
+        if not visible_notes: return
+        
+        # Optimization: Disable updates
+        self.setUpdatesEnabled(False)
+        try:
+            # 1. Start fresh: Move everything to Right Area (Tabs)
+            for d in visible_notes:
+                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, d)
+                d.show()
+            
+            if len(visible_notes) <= 1: return
+
+            # 2. Check if we should actually GRID or just TAB
+            # We GRID if force_grid is True OR if they were ALREADY split into multiple groups
+            should_grid = force_grid
+            if not should_grid:
+                 # Check if notes are in separate groups
+                 # If we find ANY two notes that aren't tabbed together, we trigger the grid
+                 base_tab_group = set(self.tabifiedDockWidgets(visible_notes[0]))
+                 base_tab_group.add(visible_notes[0])
+                 for d in visible_notes:
+                     if d not in base_tab_group:
+                         should_grid = True
+                         break
+            
+            if not should_grid:
+                logging.info("Grid Reset: Single area detected, keeping as Tabs.")
+            else:
+                logging.info("Grid Reset: Multiple areas or Split triggered, building Grid.")
+                # 3. Build the top row
+                first_row_count = (len(visible_notes) + 1) // 2
+                base = visible_notes[0]
+                for i in range(1, first_row_count):
+                    self.removeDockWidget(visible_notes[i])
+                    self.splitDockWidget(base, visible_notes[i], Qt.Orientation.Horizontal)
+                    visible_notes[i].show()
+                    base = visible_notes[i]
+                    
+                # 4. Build the bottom row
+                if len(visible_notes) > first_row_count:
+                    base_top = visible_notes[0]
+                    pivot_idx = first_row_count
+                    self.removeDockWidget(visible_notes[pivot_idx])
+                    self.splitDockWidget(base_top, visible_notes[pivot_idx], Qt.Orientation.Vertical)
+                    visible_notes[pivot_idx].show()
+                    
+                    base_bottom = visible_notes[pivot_idx]
+                    for i in range(pivot_idx + 1, len(visible_notes)):
+                        self.removeDockWidget(visible_notes[i])
+                        self.splitDockWidget(base_bottom, visible_notes[i], Qt.Orientation.Horizontal)
+                        visible_notes[i].show()
+                        base_bottom = visible_notes[i]
+            
+            # 5. Final Focus
+            target = focus_dock if focus_dock else visible_notes[0]
+            if target and target.widget():
+                target.widget().setFocus()
+        finally:
+            self.setUpdatesEnabled(True)
+
 
     # --- Delegated to VisibilityManager ---
 

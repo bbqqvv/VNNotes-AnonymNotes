@@ -169,3 +169,12 @@ class DialogManager:
                 self.mw.sidebar.refresh_tree()
 
             self.mw.save_app_state()
+
+    def show_limit_reached_dialog(self, limit=10):
+        """Plan v6: Shows a warning when the maximum number of splits is reached."""
+        QMessageBox.warning(
+            self.mw, "Limit Reached",
+            f"Standard capacity reached: <b>{limit} Note areas</b>.<br><br>"
+            "To maintain professional legibility and performance, additional splitting "
+            "is restricted. Use existing notes or close unused areas to continue."
+        )

@@ -12,14 +12,8 @@ class BrowserService:
         self._is_loaded = False # Integrity guard
 
     def load_browsers(self):
-        """Loads browser state from storage."""
-        data = self.storage.load_data()
-        if data is None:
-             logging.error("BrowserService: CRITICAL - Storage load failed. Browsers initialized in SAFE MODE.")
-             self._is_loaded = False
-             return []
-             
-        self._browsers = data.get("browsers", [])
+        """Loads browser state from SQLite via StorageManager."""
+        self._browsers = self.storage.get_all_browsers()
         self._is_loaded = True
         return self._browsers
 
@@ -59,25 +53,21 @@ class BrowserService:
         return False
 
     def sync_to_storage(self, current_browser_data):
-        """Replaces current browser list with UI state and saves."""
+        """
+        Replaces current browser list with UI state and saves to SQLite.
+        Atomic per-sync.
+        """
         if not self._is_loaded:
-             logging.warning("BrowserService: sync_to_storage BLOCKED - Service not initialized correctly.")
              return False
              
+        # Plan v8.1 fix: Clear and repopulate
+        self.storage.delete_all_browsers()
+        for browser in current_browser_data:
+            self.storage.upsert_browser_metadata(browser)
+            
         self._browsers = current_browser_data
-        self.save_to_disk()
         return True
 
     def save_to_disk(self):
-        """Persists current state to disk asynchronously."""
-        if not self._is_loaded:
-             logging.error("BrowserService: save_to_disk BLOCKED - Service not initialized correctly.")
-             return
-
-        data = self.storage.load_data()
-        if data is None:
-             logging.error("BrowserService: Aborting save_to_disk because storage load failed.")
-             return
-             
-        data["browsers"] = self._browsers
-        self.storage.save_data(data, async_save=True)
+        """Legacy compatibility hook. sync_to_storage handles immediate persistence."""
+        pass

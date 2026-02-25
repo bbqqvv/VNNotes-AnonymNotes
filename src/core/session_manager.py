@@ -116,6 +116,10 @@ class SessionManager:
 
         for dock in valid_main_docks:
             try:
+                # Plan v7.6 Fix: Ignore zombie docks that have been commanded to close but 
+                # reside in memory pending the next Qt Event Loop iteration.
+                if dock.property("vnn_closing"): continue
+                
                 widget = dock.widget()
                 if not widget: continue
                 obj_name = dock.objectName()

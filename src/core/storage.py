@@ -1,290 +1,318 @@
-import json
 import os
-import copy
 import logging
-import threading
-import hashlib
-import shutil
-from PyQt6.QtCore import QStandardPaths, QObject, QTimer, pyqtSlot
+from PyQt6.QtCore import QObject
+from src.core.database import DatabaseManager
 
 class StorageManager(QObject):
     """
-    Manages application data persistence using JSON files.
-    Optimized with background saving, dirty checking, and batch throttling.
+    Data Access Object (DAO) for the SQLite database.
+    Replaces the legacy JSON JSON file system.
     """
-    
-    def __init__(self, filename="data.json"):
+    def __init__(self):
         super().__init__()
-        base_path = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        self.file_path = os.path.join(base_path, filename)
         
-        # New: Notes directory for distributed storage
-        self.notes_dir = os.path.join(base_path, "notes")
-        if not os.path.exists(self.notes_dir):
-            os.makedirs(self.notes_dir)
-            
-        logging.info(f"StorageManager initialized. Data path: {self.file_path}")
-        logging.info(f"Notes directory: {self.notes_dir}")
-        self._last_save_hash = None
-        self._save_lock = threading.Lock()
-        self._data = None # Shared in-memory cache
-        self._throttle_timer = None
-
-    def _get_throttle_timer(self):
-        """Lazy initialization of the timer to prevent startup crashes."""
-        if self._throttle_timer is None:
-            self._throttle_timer = QTimer(self)
-            self._throttle_timer.setSingleShot(True)
-            self._throttle_timer.setInterval(2000) # Increased to 2s
-            self._throttle_timer.timeout.connect(self._on_throttle_timeout)
-        return self._throttle_timer
-
-    def _calculate_hash(self, data):
-        """Calculates a simple MD5 hash of the data to detect changes."""
+        # Auto-Migrate legacy JSON users to SQLite FTS5 silently on startup
         try:
-            json_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
-            return hashlib.md5(json_str.encode('utf-8')).hexdigest()
-        except Exception:
+            import sys
+            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+            import migrate_to_sqlite
+            migrate_to_sqlite.migrate()
+        except ImportError:
+            pass # Script not found, assuming fresh install or already migrated
+        except Exception as e:
+            logging.error(f"StorageManager: Legacy Migration Hook Failed: {e}")
+            
+        self.db = DatabaseManager()
+        logging.info("StorageManager initialized with SQLite Database Backend.")
+
+    def get_all_notes(self, only_open=False):
+        """Fetches notes metadata from the database as a list of dicts. Optional session filtering."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            sql = "SELECT * FROM notes"
+            params = []
+            if only_open:
+                sql += " WHERE is_open = 1"
+            
+            sql += " ORDER BY pinned DESC, updated_at DESC"
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logging.error(f"StorageManager.get_all_notes Error: {e}")
+            return []
+
+    def get_note_by_obj_name(self, obj_name):
+        """Fetches a single note metadata by object name."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT * FROM notes WHERE obj_name = ?", (obj_name,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            logging.error(f"StorageManager.get_note_by_obj_name Error: {e}")
             return None
 
-    def save_data(self, data, async_save=True):
-        """
-        Saves data to JSON with throttling.
-        Immediate in-memory update, delayed disk write.
-        """
-        self._data = data # Immediate consistency
-        
-        # Dirty Check
-        current_hash = self._calculate_hash(data)
-        if current_hash and current_hash == self._last_save_hash:
-            return True
-        
-        if not async_save:
-            self._get_throttle_timer().stop()
-            payload = copy.deepcopy(data)
-            return self._perform_save(payload)
-            
-        # Restart throttle timer (batching)
-        self._get_throttle_timer().start()
-        return True
-
-    def flush(self):
-        """Forces an immediate save of whatever is in the cache."""
-        if self._data is not None:
-            self._get_throttle_timer().stop()
-            with self._save_lock:
-                payload = copy.deepcopy(self._data)
-            self._perform_save(payload)
-
-    @pyqtSlot()
-    def _on_throttle_timeout(self):
-        """Triggered after the quiet period. Performs background write."""
-        if self._data is not None:
-            with self._save_lock:
-                current_hash = self._calculate_hash(self._data)
-                if current_hash != self._last_save_hash:
-                    try:
-                        payload = copy.deepcopy(self._data)
-                    except Exception as e:
-                        logging.error(f"StorageManager Copy Error: {e}")
-                        return
-                else:
-                    return
-            thread = threading.Thread(target=self._perform_save, args=(payload, current_hash), daemon=True)
-            thread.start()
-
-    def _perform_save(self, data, precomputed_hash=None):
-        """Actual disk I/O operation."""
+    def upsert_note_metadata(self, note_dict):
+        """Inserts or updates note metadata in the DB."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
         try:
-            current_hash = precomputed_hash or self._calculate_hash(data)
-            
-            with self._save_lock:
-                temp_path = self.file_path + ".tmp"
-                with open(temp_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())  # Ensure data is flushed to disk before rename
-                
-                # Robust Atomic Replace with Retry
-                # On Windows, use shutil.copy2 as fallback to avoid PermissionError
-                import time
-                for i in range(5):
-                    try:
-                        if os.path.exists(self.file_path):
-                            try:
-                                os.replace(temp_path, self.file_path)
-                            except PermissionError:
-                                # Fallback for Windows file lock: copy then delete temp
-                                shutil.copy2(temp_path, self.file_path)
-                                try:
-                                    os.remove(temp_path)
-                                except Exception:
-                                    pass
-                        else:
-                            os.rename(temp_path, self.file_path)
-                        break # Success
-                    except (PermissionError, OSError) as e:
-                        if i == 4: raise # Final attempt failed
-                        time.sleep(0.1 * (i + 1)) # Exponential backoff
-                
-                self._last_save_hash = current_hash
-                logging.debug(f"StorageManager: Atomic batched save complete.")
-                return True
-        except Exception as e:
-            logging.error(f"StorageManager Save Error: {e}")
-            if 'temp_path' in locals() and os.path.exists(temp_path):
-                try: os.remove(temp_path)
-                except: pass
-            return False
-            
-    def load_data(self):
-        """
-        Loads data from JSON file into shared cache.
-        Robust to Windows file locks with retries.
-        Auto-recovers from corrupt JSON by backing up and starting fresh.
-        """
-        if self._data is not None:
-             return self._data
-             
-        if not os.path.exists(self.file_path):
-            self._data = {}
-            return self._data
-            
-        import time
-        # Retry logic for reading (Windows handles locks poorly)
-        for i in range(3):
-            try:
-                with open(self.file_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if not content:
-                        self._data = {}
-                    else:
-                        self._data = json.loads(content)
-                    
-                    self._last_save_hash = self._calculate_hash(self._data)
-                    return self._data
-            except (PermissionError, OSError) as e:
-                logging.warning(f"StorageManager Load Retry {i+1}: {e}")
-                if i == 2: break
-                time.sleep(0.05 * (i + 1))
-            except json.JSONDecodeError as e:
-                logging.error(f"StorageManager JSON Corrupt: {e}")
-                # AUTO-RECOVER: Backup the corrupt file and start fresh.
-                # This prevents a one-time write corruption from permanently breaking the app.
-                try:
-                    corrupt_backup = self.file_path + ".corrupt"
-                    shutil.copy2(self.file_path, corrupt_backup)
-                    logging.warning(f"StorageManager: Corrupt data.json backed up to {corrupt_backup}. Starting fresh.")
-                except Exception as backup_err:
-                    logging.error(f"StorageManager: Could not backup corrupt file: {backup_err}")
-                self._data = {}
-                return self._data
-            except Exception as e:
-                logging.error(f"StorageManager Load Error: {e}", exc_info=True)
-                return None
-                
-        return None # Indicate persistent failure
+            obj_name = note_dict.get("obj_name")
+            title = note_dict.get("title", "")
+            folder = note_dict.get("folder", "General")
+            pinned = note_dict.get("pinned", 0)
+            # Default to current value if not provided in dict, to prevent accidental closure
+            is_open = note_dict.get("is_open", 1) 
 
-    # --- Distributed Storage Methods ---
-    
-    def get_note_path(self, obj_name):
-        """Returns the absolute path for a specific note slug/id."""
-        return os.path.join(self.notes_dir, f"{obj_name}.html")
+            # Check if exists
+            cursor.execute("SELECT id FROM notes WHERE obj_name = ?", (obj_name,))
+            existing = cursor.fetchone()
+
+            if existing: # Update
+                cursor.execute("""
+                    UPDATE notes 
+                    SET title = ?, folder = ?, pinned = ?, is_open = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE obj_name = ?
+                """, (title, folder, pinned, is_open, obj_name))
+            else: # Insert
+                cursor.execute("""
+                    INSERT INTO notes (obj_name, title, folder, pinned, is_open)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (obj_name, title, folder, pinned, is_open))
+            
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.upsert_note_metadata Error: {e}")
+            return False
+
+    def set_all_notes_closed(self):
+        """Sets is_open=0 for all notes in the database. Used during session sync."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE notes SET is_open = 0")
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.set_all_notes_closed Error: {e}")
+            return False
+
+    def set_note_open_status(self, obj_name, is_open):
+        """Explicitly sets the session visibility of a single note."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("UPDATE notes SET is_open = ? WHERE obj_name = ?", (1 if is_open else 0, obj_name))
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.set_note_open_status Error: {e}")
+            return False
+
+    def delete_note(self, obj_name):
+        """Deletes a note entirely (cascades to content via FK)."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM notes WHERE obj_name = ?", (obj_name,))
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.delete_note Error: {e}")
+            return False
 
     def save_note_content(self, obj_name, content):
-        """
-        Atomically saves a note's HTML content.
-        Pattern: write .tmp → fsync → rename old → .bak → rename .tmp → target.
-        If power is cut between steps, .bak always holds the last good version.
-        """
-        path = self.get_note_path(obj_name)
-        tmp_path = path + ".tmp"
-        bak_path = path + ".bak"
-        try:
-            # Step 1: Write to temp file and flush to OS buffer
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
+        """Atomically saves a note's HTML content. The FTS5 trigger handles the search index."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try: # Use transaction around content upsert
+            cursor.execute("BEGIN;")
+            cursor.execute("SELECT id FROM notes WHERE obj_name = ?", (obj_name,))
+            note_row = cursor.fetchone()
+            if not note_row:
+                cursor.execute("ROLLBACK;")
+                logging.warning(f"Attempted to save content for nonexistent metadata obj_name: {obj_name}")
+                return False
+            note_id = note_row[0]
 
-            # Step 2: Back up current file (last good version)
-            if os.path.exists(path):
-                try:
-                    os.replace(bak_path, bak_path + '.old') if os.path.exists(bak_path) else None
-                    os.replace(path, bak_path)
-                except Exception as bak_err:
-                    logging.warning(f"StorageManager: Could not create .bak for {obj_name}: {bak_err}")
+            # Check existing content
+            cursor.execute("SELECT 1 FROM notes_content WHERE note_id = ?", (note_id,))
+            exists = cursor.fetchone()
 
-            # Step 3: Atomically replace target with new content
-            try:
-                os.replace(tmp_path, path)  # Atomic on same filesystem
-            except OSError:
-                # Cross-device fallback (e.g. symlinked to another drive)
-                import shutil
-                shutil.move(tmp_path, path)
-
-            logging.debug(f"StorageManager: Atomic save OK → {path}")
+            if exists:
+                cursor.execute("UPDATE notes_content SET content = ? WHERE note_id = ?", (content, note_id))
+            else:
+                cursor.execute("INSERT INTO notes_content (note_id, content) VALUES (?, ?)", (note_id, content))
+                
+            # Update the notes table updated_at
+            cursor.execute("UPDATE notes SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (note_id,))
+            cursor.execute("COMMIT;")
             return True
         except Exception as e:
-            logging.error(f"StorageManager: Error saving note {obj_name}: {e}")
-            # Cleanup orphan temp file
-            if os.path.exists(tmp_path):
-                try: os.remove(tmp_path)
-                except: pass
+            conn.execute("ROLLBACK;")
+            logging.error(f"StorageManager.save_note_content Error: {e}")
             return False
 
     def load_note_content(self, obj_name):
-        """
-        Loads a note's HTML content from disk.
-        - Unicode hardened: errors='replace' + null byte strip.
-        - Crash recovery journal: if target is missing/empty but .bak exists,
-          auto-restores from .bak (covers power cut mid-save).
-        - Also detects leftover .tmp files from previous crash for logging.
-        """
-        path = self.get_note_path(obj_name)
-        bak_path = path + ".bak"
-        tmp_path = path + ".tmp"
-
-        # Crash journal: alert if a .tmp file is leftover from a crash
-        if os.path.exists(tmp_path):
-            logging.warning(f"StorageManager: Found orphan .tmp for {obj_name} — previous session may have crashed during save.")
-
-        # Determine which file to actually read
-        use_bak = False
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
-            if os.path.exists(bak_path) and os.path.getsize(bak_path) > 0:
-                logging.warning(f"StorageManager: Main file missing/empty for {obj_name}. Auto-restoring from .bak.")
-                use_bak = True
-            elif not os.path.exists(path):
-                logging.warning(f"StorageManager: Note file not found: {path}")
-                return ""
-
-        read_path = bak_path if use_bak else path
+        """Loads a note's HTML content from DB."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
         try:
-            with open(read_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-            # Strip null bytes — common artifact of corrupted/partial writes
-            content = content.replace('\x00', '')
-            if use_bak:
-                # Commit backup as the canonical file so future saves are consistent
-                try:
-                    import shutil
-                    shutil.copy2(bak_path, path)
-                except Exception:
-                    pass
-            return content
+            cursor.execute("""
+                SELECT c.content 
+                FROM notes_content c
+                JOIN notes n ON n.id = c.note_id
+                WHERE n.obj_name = ?
+            """, (obj_name,))
+            row = cursor.fetchone()
+            if row and row['content']:
+                return row['content']
+            return ""
         except Exception as e:
-            logging.error(f"StorageManager: Error loading note {obj_name}: {e}")
+            logging.error(f"StorageManager.load_note_content Error: {e}")
             return ""
 
-    def delete_note_content(self, obj_name):
-        """Deletes the physical file associated with a note."""
-        path = self.get_note_path(obj_name)
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-                logging.info(f"StorageManager: Deleted note file {path}")
-                return True
-            except Exception as e:
-                logging.error(f"StorageManager: Error deleting note file {obj_name}: {e}")
-        return False
+    # ── Browser DAO (Plan v8.1) ───────────────────────────────────────
+
+    def get_all_browsers(self):
+        """Fetches all saved browser sessions."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT * FROM browsers ORDER BY updated_at ASC")
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logging.error(f"StorageManager.get_all_browsers Error: {e}")
+            return []
+
+    def upsert_browser_metadata(self, browser_dict):
+        """Atomically saves or updates a browser session."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            obj_name = browser_dict.get("obj_name")
+            title = browser_dict.get("title", "Mini Browser")
+            url = browser_dict.get("url", "https://google.com")
+
+            cursor.execute("SELECT id FROM browsers WHERE obj_name = ?", (obj_name,))
+            existing = cursor.fetchone()
+
+            if existing: # Update
+                cursor.execute("""
+                    UPDATE browsers 
+                    SET title = ?, url = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE obj_name = ?
+                """, (title, url, obj_name))
+            else: # Insert
+                cursor.execute("""
+                    INSERT INTO browsers (obj_name, title, url)
+                    VALUES (?, ?, ?)
+                """, (obj_name, title, url))
+            
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.upsert_browser_metadata Error: {e}")
+            return False
+
+    def delete_all_browsers(self):
+        """Wipes all browser sessions from DB. Used during UI sync."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM browsers")
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.delete_all_browsers Error: {e}")
+            return False
+
+    def flush(self):
+        """Legacy compatibility hook. SQLite persists immediately, so flush is a no-op."""
+        pass
+        
+    def search_notes_fts(self, query):
+        """
+        Executes a blazing fast Full-Text Search via the SQLite FTS5 engine.
+        Returns matching notes formatting identical to the previous NoteService format
+        so the UI can remain completely oblivious to the database transition.
+        """
+        query = query.strip()
+        if not query: return []
+        
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        # We want to support prefix matching so searching "logi" finds "login"
+        # We split the query into words and append the * wildcard to each.
+        import string
+        words = query.translate(str.maketrans('', '', string.punctuation)).split()
+        if not words: return []
+        
+        # Format for FTS5: each word prefix matched, e.g. "hello*" AND "world*"
+        fts_query = " AND ".join(f'"{word}"*' for word in words if word)
+        
+        try:
+            # The heart of the implementation: The FTS5 MATCH clause combined with snippet()
+            # snippet(table, colIdx, preMatch, postMatch, overflow, maxTokens)
+            sql = """
+            SELECT 
+                fts.rowid,
+                n.obj_name,
+                n.title,
+                n.folder,
+                n.pinned,
+                snippet(notes_fts, 1, '<mark>', '</mark>', '...', 15) as content_snippet
+            FROM notes_fts fts
+            JOIN notes n ON n.id = fts.rowid
+            WHERE notes_fts MATCH ?
+            ORDER BY rank
+            LIMIT 50;
+            """
+            cursor.execute(sql, (fts_query,))
+            rows = cursor.fetchall()
+            
+            matches = []
+            for row in rows:
+                note = {
+                    "obj_name": row["obj_name"],
+                    "title": row["title"],
+                    "folder": row["folder"],
+                    "pinned": row["pinned"]
+                }
+                
+                note_matches = []
+                
+                # Check if it hit the title
+                if query.lower() in row["title"].lower():
+                     note_matches.append({"type": "title", "text": row["title"]})
+                     
+                # Add snippet
+                snippet = row["content_snippet"]
+                if snippet:
+                     # Remove HTML tags except our <mark> from snippet
+                     import re
+                     # First strip all tags except mark
+                     # This is a basic strip, letting the UI handle the mark highlighting
+                     clean_snippet = re.sub(r'<(?!/?mark>)[^>]+>', '', snippet)
+                     note_matches.append({"type": "content", "line": 0, "text": clean_snippet})
+                
+                if note_matches:
+                    matches.append({
+                        "note": note,
+                        "matches": note_matches
+                    })
+            
+            return matches
+        except Exception as e:
+            logging.error(f"StorageManager FTS5 Search Error: {e}")
+            return []
+
+    def load_data(self):
+        """Legacy compatibility hook."""
+        return {"notes": self.get_all_notes()}
+        
+    def save_data(self, data, async_save=True):
+        """Legacy compatibility hook for monolithic save. Ignored as everything goes via upsert_note_metadata."""
+        return True

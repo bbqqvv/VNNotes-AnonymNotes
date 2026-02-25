@@ -32,17 +32,25 @@ class BrandingOverlay(QWidget):
         
         self.text_label = QLabel("VNNOTES")
         self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Stylized Typography (Refined): Light, Spaced
+        font = QFont("Segoe UI Light", 34)
+        if sys.platform != "win32":
+            font.setFamily("Inter")
+        self.text_label.setFont(font)
+        
+        # Visual Depth: Subtle Shadow
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.text_label.setGraphicsEffect(shadow)
+        
         container_layout.addWidget(self.text_label)
         
         self.main_layout.addWidget(self.content_container, 0, Qt.AlignmentFlag.AlignCenter)
         self.main_layout.addStretch(1)
-
-        # Pre-allocate effects
-        self._logo_opacity_effect = QGraphicsOpacityEffect(self.logo_label)
-        self.logo_label.setGraphicsEffect(self._logo_opacity_effect)
-        
-        self._text_opacity_effect = QGraphicsOpacityEffect(self.text_label)
-        self.text_label.setGraphicsEffect(self._text_opacity_effect)
 
     def _load_logo(self):
         """Helper to find the correct logo path."""
@@ -59,75 +67,88 @@ class BrandingOverlay(QWidget):
             return QPixmap(path)
         return None
 
+    @property
+    def is_suppressed(self):
+        return getattr(self, "_is_suppressed", False)
+    
+    @is_suppressed.setter
+    def is_suppressed(self, value):
+        self._is_suppressed = value
+        if value:
+            self.content_container.hide()
+        else:
+            self.content_container.show()
+        self.update() # Plan v8.18: Post-visibility signal
+        self.repaint() # Plan v9.2: Synchronous visual commit before GUI freeze
+
     def showEvent(self, event):
         """Final safety check when showing."""
         super().showEvent(event)
-        # Fire once more after a delay to catch the final window state
-        QTimer.singleShot(500, self._update_elements)
+        if not self.is_suppressed:
+            # Fire once more after a delay to catch the final window state
+            QTimer.singleShot(200, self._update_elements)
 
     def resizeEvent(self, event):
-        """Update logo scaling when widget size changes."""
+        """Minimal update on resize."""
         super().resizeEvent(event)
-        self._update_elements()
+        if not self.is_suppressed:
+            self._update_elements()
 
     def _update_elements(self):
-        """Syncs element sizes and colors with the current theme and geometry."""
-        if getattr(self, "_updating", False): return
+        """Syncs logo scaling and colors with the current theme."""
+        if getattr(self, "_updating", False) or self.is_suppressed: return
         self._updating = True
         
         try:
             h = self.height()
-            window = self.window()
+            if h < 20 or not self.content_container.isVisible(): 
+                return 
             
-            if h < 20: return 
-
-            # 1. Scale Logo
-            if self.logo_pixmap:
-                max_logo_h = min(int(h * 0.3), 300)
-                scaled = self.logo_pixmap.scaledToHeight(max_logo_h, Qt.TransformationMode.SmoothTransformation)
+            # 1. Scale Logo (Plan v8.17: Larger, more prominent)
+            if hasattr(self, 'logo_pixmap') and self.logo_pixmap and not self.logo_pixmap.isNull():
+                target_h = min(180, h // 3)
+                scaled = self.logo_pixmap.scaledToHeight(target_h, Qt.TransformationMode.SmoothTransformation)
                 self.logo_label.setPixmap(scaled)
-            
-            # 2. Update Font
-            font_size = 32
-            if h < 400: font_size = 24
-            font = QFont("Inter", font_size, QFont.Weight.Medium)
-            if sys.platform == "win32":
-                 font = QFont("Segoe UI Variable Display", font_size, QFont.Weight.Medium)
-            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6)
-            self.text_label.setFont(font)
-
-            # 3. Apply Theme Opacity/Colors
+                
+            # 2. Theme Opacity/Colors
             is_dark = self._is_dark_mode()
-            text_color = "#ffffff" if is_dark else "#000000"
+            text_alpha = 100 if is_dark else 150
             
             window = self.window()
+            text_color = QColor("#ffffff") if is_dark else QColor("#000000")
+            
             if hasattr(window, "theme_manager"):
                 tm = window.theme_manager
                 c = tm.THEME_CONFIG.get(tm.current_theme, {})
-                text_color = c.get("text", text_color)
+                text_color = QColor(c.get("text", text_color.name()))
+            
+            rgba_str = f"rgba({text_color.red()}, {text_color.green()}, {text_color.blue()}, {text_alpha})"
+            self.text_label.setStyleSheet(f"color: {rgba_str}; background: transparent; border: none; letter-spacing: 8px;")
+            
+            self.logo_label.adjustSize()
+            self.text_label.adjustSize()
+            self.content_container.adjustSize()
+            self.content_container.updateGeometry()
+            
+            if self.layout():
+                self.layout().invalidate()
+                self.layout().activate()
                 
-            l_op = 0.25 if is_dark else 0.45
-            t_op = 0.55 if is_dark else 0.65
-            
-            self.text_label.setStyleSheet(f"color: {text_color}; background: transparent; border: none;")
-            self.logo_label.setStyleSheet("background: transparent; border: none;")
-            
-            self._logo_opacity_effect.setOpacity(l_op)
-            self._text_opacity_effect.setOpacity(t_op)
+            self.update()
+        except Exception:
+            pass
         finally:
             self._updating = False
 
     def paintEvent(self, event):
-        """Handle background fill - Always default to dark for professional splash experience."""
-        painter = QPainter(self)
+        """Handle background fill (Plan v9.2: Continuity even when suppressed)."""
         
-        # Default fallback is deep zinc (#0b0b0e) to prevent "White Screen" if theme manager delay occurs
+        painter = QPainter(self)
         bg_color = QColor("#0b0b0e") 
         
         window = self.window()
         if hasattr(window, "theme_manager") and window.theme_manager:
             tm = window.theme_manager
-            # Safe retrieval to prevent crash during init
             try:
                 c = tm.THEME_CONFIG.get(tm.current_theme, {})
                 bg_color = QColor(c.get("bg", "#0b0b0e"))

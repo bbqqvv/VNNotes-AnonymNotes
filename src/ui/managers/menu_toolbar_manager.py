@@ -88,14 +88,13 @@ class MenuToolbarManager:
                           self.main_window.show_quick_switcher, icon="search.svg")
         
         
-        self.create_action("split_right", "Split Right", "Open current note in new right pane (Ctrl+\\)", "Ctrl+\\",
-                          lambda: self.main_window.split_active_note(horizontal=True), icon="split_right.svg")
-        
-        self.create_action("split_down", "Split Down", "Open current note in new bottom pane", None,
-                          lambda: self.main_window.split_active_note(horizontal=False), icon="split_down.svg")
+        self.create_action("restore_grid", "Safe Grid Reset", "Tidy layout into Grid/Tabs (Respects tab stacks) (Ctrl+Alt+G)", "Ctrl+Alt+G",
+                          self.main_window.restore_grid_layout, icon="table.svg")
 
         self.create_action("close_tab", "Close Tab", "Close Active Tab (Ctrl+W)", "Ctrl+W",
                           self.main_window.close_active_tab)
+        self.create_action("close_all", "Close All Notes", "Close every open tab in the app", None,
+                          self.main_window.tab_manager.close_all_tabs_app_wide)
         self.create_action("reopen_tab", "Reopen Closed Tab", "Reopen Last Closed Tab (Ctrl+Shift+T)", "Ctrl+Shift+T",
                           self.main_window.reopen_last_closed_tab)
 
@@ -185,6 +184,7 @@ class MenuToolbarManager:
 
     def setup_toolbar(self):
         toolbar = QToolBar("Main Toolbar")
+        toolbar.setObjectName("MainToolBar") # Senior Fix: Required for QMainWindow.saveState()
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
         toolbar.setIconSize(QSize(20, 20))
@@ -202,8 +202,8 @@ class MenuToolbarManager:
         toolbar.addAction(self.actions["insert-image"])
         # Add Split Layout actions to toolbar for easy mouse access
         toolbar.addSeparator()
-        toolbar.addAction(self.actions["split_right"])
-        toolbar.addAction(self.actions["split_down"])
+        toolbar.addAction(self.actions["restore_grid"])
+
         # Spacer Left
         spacer_left = QWidget()
         spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -317,6 +317,7 @@ class MenuToolbarManager:
         file_menu.addAction(self.actions["save_as"])
         file_menu.addSeparator()
         file_menu.addAction(self.actions["close_tab"])
+        file_menu.addAction(self.actions["close_all"])
         file_menu.addAction(self.actions["reopen_tab"])
         file_menu.addSeparator()
         if "autosave" in self.actions:
@@ -341,6 +342,7 @@ class MenuToolbarManager:
         view_menu.addAction(self.actions["stealth"])
         view_menu.addAction(self.actions["always_on_top"])
         view_menu.addAction(self.actions["ghost_click"])
+        view_menu.addAction(self.actions["restore_grid"])
         
         view_menu.addSeparator()
         view_menu.addSeparator()
