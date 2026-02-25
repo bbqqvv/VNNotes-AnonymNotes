@@ -4,14 +4,14 @@ from PyQt6 import sip  # REQUIRED for zombie object checks
 
 from PyQt6.QtWidgets import QDockWidget, QMenu, QApplication
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject
 
 from src.features.notes.note_pane import NotePane
 
 logger = logging.getLogger(__name__)
 
 
-class TabManager:
+class TabManager(QObject):
     """
     Manages tab bar hooks, context menus, close/close-others/close-all,
     tab-to-dock mapping, and tab selection/rename interactions.
@@ -19,6 +19,7 @@ class TabManager:
     """
 
     def __init__(self, main_window):
+        super().__init__(main_window) # Parent is MainWindow for lifecycle
         self.mw = main_window
         self._closed_tabs_stack = []  # Stack of {title, content, obj_name}
         self._is_syncing = False      # Re-entrancy Guard
@@ -44,20 +45,22 @@ class TabManager:
                     # Plan v6.9: REMOVED the aggressive ToolTip sync loop.
                     
                     # Signal Setup with pointer-reuse safety
+                    if not tab_bar.property("vnn_tab_hooked"):
+                        tab_bar.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+                        tab_bar.installEventFilter(self)
+                        tab_bar.setProperty("vnn_tab_hooked", True)
+                        
                     if not tab_bar.property("hooked"):
                         tab_bar.tabBarDoubleClicked.connect(
                             lambda idx, tb=tab_bar: self.on_tab_double_clicked(tb, idx))
                         tab_bar.currentChanged.connect(
                             lambda idx, tb=tab_bar: self.on_tab_changed(tb, idx))
-
                         tab_bar.setTabsClosable(True)
                         tab_bar.tabCloseRequested.connect(
                             lambda idx, tb=tab_bar: self.on_tab_close_requested(tb, idx))
-
                         tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                         tab_bar.customContextMenuRequested.connect(
                             lambda pos, tb=tab_bar: self.on_tab_context_menu(tb, pos))
-
                         tab_bar.setProperty("hooked", True)
                         logger.debug(f"TabManager (v7.0): Hooked TabBar {id(tab_bar)}")
                 except (RuntimeError, Exception): continue
@@ -127,45 +130,87 @@ class TabManager:
         except (RuntimeError, Exception): return []
 
     def _get_dock_at_index(self, tab_bar, index, claimed_docks=None):
-        """Standardized ToolTip-ID lookup for tabs (v7.0 - ULTIMATE)."""
+        """
+        Retrieves the QDockWidget associated with the tab at 'index'.
+        Plan v12.7.1: Robust identification with relaxed area matching.
+        """
+        if index < 0 or not tab_bar or sip.isdeleted(tab_bar): return None
+        
         try:
-            if not tab_bar or sip.isdeleted(tab_bar): return None
-            if index < 0 or index >= tab_bar.count(): return None
-            
-            # 1. PRO LOOKUP: Direct widget query from parent
+            # 1. Strategy: Direct widget query from parent
             parent = tab_bar.parentWidget()
             if parent and not sip.isdeleted(parent):
                 try:
                     if hasattr(parent, 'widget'):
                         w = parent.widget(index)
-                        if w and not sip.isdeleted(w) and isinstance(w, QDockWidget):
-                            return w
+                        if w and not sip.isdeleted(w):
+                            target_dock = None
+                            if isinstance(w, QDockWidget):
+                                target_dock = w
+                            else:
+                                # Fallback: Sometimes the tab holds the content widget (NotePane),
+                                # and its parent is the QDockWidget.
+                                p = w.parent()
+                                if p and isinstance(p, QDockWidget):
+                                    target_dock = p
+                            
+                            if target_dock:
+                                self._update_tab_tooltip(tab_bar, index, target_dock)
+                                return target_dock
                 except (AttributeError, RuntimeError): pass
 
-            # 2. FAIL-SAFE: ToolTip ID lookup
-            tip = tab_bar.tabToolTip(index)
-            if tip:
-                match = re.search(r"\[ID: (.*?)\]", tip)
-                if match:
-                    obj_name = match.group(1)
-                    dock = self.mw.dock_manager.get_dock(obj_name)
-                    if dock and not sip.isdeleted(dock): return dock
+            # 2. Strategy: Stack-Based Identification (The "Equivalence Class" trick)
+            # Find the visible dock in the same area as this tab bar.
+            # In a tab stack, only the ACTIVE tab's dock is visible.
+            tab_text = tab_bar.tabText(index)
+            if not tab_text: return None
+            
+            active_idx = tab_bar.currentIndex()
+            if active_idx < 0: return None
+            
+            active_text = tab_bar.tabText(active_idx)
+            visible_anchor = None
+            
+            # Find the ONE dock that is visible and matches the active tab's title
+            for dock in self.mw.dock_manager.get_all_content_docks():
+                if dock and not sip.isdeleted(dock) and dock.isVisible() and dock.windowTitle() == active_text:
+                    # Check if this dock is actually tabified (it should be if there's a tab bar)
+                    if self.mw.tabifiedDockWidgets(dock):
+                        visible_anchor = dock
+                        break
+            
+            if visible_anchor:
+                # Get all docks tabified with this anchor (including the anchor itself)
+                stack = [visible_anchor] + self.mw.tabifiedDockWidgets(visible_anchor)
                 
-            # 3. ABSOLUTE FALLBACK: Title matching
-            title = tab_bar.tabText(index)
-            if title:
-                available = self.mw.dock_manager.get_all_content_docks()
-                for d in available:
-                    try:
-                        if not d or sip.isdeleted(d): continue
-                        if claimed_docks is not None and d in claimed_docks: continue
-                        if d.windowTitle() == title and not d.isFloating():
-                            return d
-                    except RuntimeError: continue
-                
-            return None
+                # Match title within this specific stack
+                for dock in stack:
+                    if dock and not sip.isdeleted(dock) and dock.windowTitle() == tab_text:
+                        if claimed_docks is not None and dock in claimed_docks: continue
+                        self._update_tab_tooltip(tab_bar, index, dock)
+                        return dock
+            
+            # 3. Strategy: Global Fallback (Last resort)
+            for dock in self.mw.dock_manager.get_all_content_docks():
+                if dock and not sip.isdeleted(dock) and dock.windowTitle() == tab_text:
+                    if claimed_docks is not None and dock in claimed_docks: continue
+                    return dock
         except (RuntimeError, Exception):
-            return None
+             pass
+        return None
+
+    def _update_tab_tooltip(self, tab_bar, index, dock):
+        """Enhances tab tooltips with folder context for notes."""
+        try:
+            obj_name = dock.objectName()
+            if obj_name.startswith("NoteDock_") and hasattr(self.mw, 'note_service'):
+                note = self.mw.note_service.get_note_by_id(obj_name)
+                if note:
+                    folder = note.get("folder", "General")
+                    tab_bar.setTabToolTip(index, f"{note['title']} (Folder: {folder})")
+                    return
+            tab_bar.setTabToolTip(index, dock.windowTitle())
+        except (RuntimeError, Exception): pass
 
     def on_tab_changed(self, tab_bar, index):
         """Called when a tab is selected."""
@@ -177,8 +222,42 @@ class TabManager:
                 if widget and not sip.isdeleted(widget):
                     if isinstance(widget, NotePane):
                         self.mw.set_active_pane(widget)
-                        widget.setFocus() 
+                        # Plan v2.5: Only focus editor if a TabBar DOES NOT have focus.
+                        # This is the most reliable way to ensure we don't steal focus after a click.
+                        from PyQt6.QtWidgets import QTabBar
+                        focused = QApplication.focusWidget()
+                        if not isinstance(focused, QTabBar):
+                            widget.setFocus() 
         except (RuntimeError, Exception): pass
+
+    def eventFilter(self, watched, event):
+        """Intercepts Tab/Shift+Tab keys on the TabBar to cycle tabs."""
+        from PyQt6.QtWidgets import QTabBar
+        from PyQt6.QtCore import QEvent
+        
+        if isinstance(watched, QTabBar):
+            # Plan v2.5: Capture focus on click (tab or bar)
+            if event.type() == QEvent.Type.MouseButtonPress:
+                watched.setFocus()
+                return False # Let QTabBar handle selection
+                
+            if event.type() == QEvent.Type.KeyPress:
+                key = event.key()
+                # Use standard int() comparison for maximum PyQt version compatibility
+                if key == int(Qt.Key.Key_Tab):
+                    count = watched.count()
+                    if count > 1:
+                        new_idx = (watched.currentIndex() + 1) % count
+                        watched.setCurrentIndex(new_idx)
+                    return True # Consume Tab key
+                elif key == int(Qt.Key.Key_Backtab): # Shift+Tab
+                    count = watched.count()
+                    if count > 1:
+                        new_idx = (watched.currentIndex() - 1 + count) % count
+                        watched.setCurrentIndex(new_idx)
+                    return True # Consume Shift+Tab
+                
+        return super().eventFilter(watched, event)
 
     def on_tab_double_clicked(self, tab_bar, index):
         """Called when a tab is double-clicked — opens rename dialog."""
@@ -196,10 +275,16 @@ class TabManager:
         try:
             if not tab_bar or sip.isdeleted(tab_bar): return
             
-            docks = self.get_docks_in_tab_order(tab_bar)
-            for dock in docks:
-                if dock and not sip.isdeleted(dock):
-                    self._close_specific_dock(dock, skip_save=True)
+            # Batch optimization
+            self.mw._is_batch_closing = True
+            try:
+                docks = self.get_docks_in_tab_order(tab_bar)
+                for dock in docks:
+                    if dock and not sip.isdeleted(dock):
+                        self._close_specific_dock(dock, skip_save=True)
+            finally:
+                self.mw._is_batch_closing = False
+                
             self.mw.save_app_state()
                 
             if hasattr(self.mw, 'check_docks_closed'):
@@ -248,11 +333,15 @@ class TabManager:
             if not all_docks: return
             
             self.mw.set_active_pane(None)
-            for dock in all_docks:
-                try:
-                    if not dock or sip.isdeleted(dock): continue
-                    self._close_specific_dock(dock, skip_save=True)
-                except (RuntimeError, Exception): continue
+            self.mw._is_batch_closing = True
+            try:
+                for dock in all_docks:
+                    try:
+                        if not dock or sip.isdeleted(dock): continue
+                        self._close_specific_dock(dock, skip_save=True)
+                    except (RuntimeError, Exception): continue
+            finally:
+                self.mw._is_batch_closing = False
                 
             self.mw.save_app_state()
                 

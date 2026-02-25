@@ -9,7 +9,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
                              QTreeWidgetItemIterator, QPushButton, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QRectF
 from PyQt6.QtGui import QIcon, QFont, QAction, QTextDocument, QAbstractTextDocumentLayout, QPalette, QPainter, QColor
+from PyQt6 import sip
 from src.utils.ui_utils import get_icon, get_icon_dir
+from src.ui.password_dialog import PasswordDialog
 
 class HtmlItemDelegate(QStyledItemDelegate):
     """Renders tree items with HTML (for keyword highlighting in search results)."""
@@ -459,6 +461,7 @@ class SidebarWidget(QWidget):
         folder_icon = get_icon("folder-open.svg", is_dark)
         note_icon = get_icon("note.svg", is_dark)
         pin_icon = get_icon("pin.svg", is_dark)
+        lock_icon_small = get_icon("lock.svg", is_dark)
         
         # 1. Pinned Notes Section
         pinned_notes = self.note_service.get_pinned_notes()
@@ -476,24 +479,20 @@ class SidebarWidget(QWidget):
                 obj_name = note.get("obj_name")
                 item = QTreeWidgetItem(pin_folder)
                 item.setText(0, note.get("title", "Untitled"))
-                item.setIcon(0, note_icon)
+                
+                # Check for lock icon
+                if note.get("is_locked"):
+                    item.setIcon(0, lock_icon_small)
+                else:
+                    item.setIcon(0, note_icon)
+                    
                 item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name, "pinned": True})
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
                 self._note_item_map[obj_name] = item # Cache for O(1) sync
 
         notes = self.note_service.get_notes()
         
-        # In-memory sanitization for grouping (merges "General (1)" into "General")
-        folder_clean_pattern = r"(\s\(\d+\))+$"
-        sanitized_notes = []
-        for n in notes:
-            # Create a shallow copy to avoid modifying service data directly here
-            # although service already sanitized it on load, this is defensive.
-            n_copy = n.copy()
-            n_copy["folder"] = re.sub(folder_clean_pattern, "", n.get("folder", "General"))
-            sanitized_notes.append(n_copy)
-            
-        config_structure = self._group_notes_by_folder(sanitized_notes)
+        config_structure = self._group_notes_by_folder(notes)
         
         # Sort folders (General first, then alphabetical)
         sorted_folders = sorted(config_structure.keys())
@@ -510,14 +509,24 @@ class SidebarWidget(QWidget):
             
             folder_item = QTreeWidgetItem(self.tree)
             folder_item.setText(0, f"{clean_name} ({note_count})") 
-            folder_item.setIcon(0, folder_icon)
+            
+            # Check if fold is locked
+            is_locked = self.note_service.is_folder_locked(folder)
+            if is_locked:
+                folder_item.setIcon(0, lock_icon_small)
+            else:
+                folder_item.setIcon(0, folder_icon)
+                
             folder_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "folder", "name": clean_name})
             
-            # Restore expansion state (default to True only for "Pinned", or if it was expanded)
-            if clean_name in expanded_folders or clean_name == "Pinned":
+            # Restore expansion state (prevent expansion if locked)
+            if is_locked:
+                folder_item.setExpanded(False)
+            elif clean_name in expanded_folders or clean_name == "Pinned":
                 folder_item.setExpanded(True)
             else:
                 folder_item.setExpanded(False)
+                
             folder_item.setFlags(folder_item.flags() | Qt.ItemFlag.ItemIsDropEnabled | Qt.ItemFlag.ItemIsEditable)
             folder_item.setFlags(folder_item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled) 
             
@@ -526,13 +535,22 @@ class SidebarWidget(QWidget):
             font.setPointSize(9)
             folder_item.setFont(0, font)
             
+            if is_locked:
+                continue # Skip adding child items for a locked folder
+                
             # Use folder_notes which we calculated above
             for note in folder_notes:
                 obj_name = note.get("obj_name")
                 note_item = QTreeWidgetItem(folder_item)
                 note_title = note.get("title", "Untitled")
                 note_item.setText(0, note_title) # No emoji
-                note_item.setIcon(0, note_icon)
+                
+                # Check for lock icon
+                if note.get("is_locked"):
+                    note_item.setIcon(0, lock_icon_small)
+                else:
+                    note_item.setIcon(0, note_icon)
+
                 note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name})
                 note_item.setToolTip(0, note.get("content", "")[:100])
                 self._note_item_map[obj_name] = note_item # Cache for O(1) sync
@@ -572,11 +590,15 @@ class SidebarWidget(QWidget):
         all_docks = self.main_window.findChildren(QDockWidget)
         logging.debug(f"[Sidebar] _add_browser_section: found {len(all_docks)} total docks")
         for dock in all_docks:
-            obj = dock.objectName()
-            logging.debug(f"[Sidebar]   dock: {obj}")
-            if obj == "SidebarDock" or not obj.startswith("BrowserDock_"):
-                continue
-            browser_docks.append(dock)
+            try:
+                if sip.isdeleted(dock):
+                    continue
+                obj = dock.objectName()
+                logging.debug(f"[Sidebar]   dock: {obj}")
+                if obj == "SidebarDock" or not obj.startswith("BrowserDock_"):
+                    continue
+                browser_docks.append(dock)
+            except RuntimeError: continue
 
         logging.debug(f"[Sidebar] browser_docks count: {len(browser_docks)}")
         if not browser_docks:
@@ -615,26 +637,30 @@ class SidebarWidget(QWidget):
         if not self.main_window:
             return
         for dock in self.main_window.findChildren(QDockWidget):
-            if dock.objectName() == obj_name:
-                dock.show()
-                dock.raise_()
-                dock.setFocus()
-                return
+            try:
+                if not sip.isdeleted(dock) and dock.objectName() == obj_name:
+                    dock.show()
+                    dock.raise_()
+                    dock.setFocus()
+                    return
+            except RuntimeError: continue
 
     def _rename_browser_dock(self, obj_name):
         """Show input dialog to rename a browser dock."""
         if not self.main_window:
             return
         for dock in self.main_window.findChildren(QDockWidget):
-            if dock.objectName() == obj_name:
-                current_title = dock.windowTitle()
-                new_title, ok = QInputDialog.getText(
-                    self, "Rename Browser", "New name:", text=current_title)
-                if ok and new_title.strip():
-                    dock.setWindowTitle(new_title.strip())
-                    dock.setToolTip(new_title.strip())
-                    self.refresh_tree()
-                return
+            try:
+                if not sip.isdeleted(dock) and dock.objectName() == obj_name:
+                    current_title = dock.windowTitle()
+                    new_title, ok = QInputDialog.getText(
+                        self, "Rename Browser", "New name:", text=current_title)
+                    if ok and new_title.strip():
+                        dock.setWindowTitle(new_title.strip())
+                        dock.setToolTip(new_title.strip())
+                        self.refresh_tree()
+                    return
+            except RuntimeError: continue
 
     def _close_browser_dock(self, obj_name):
         """Close a browser dock and delete its persistent data."""
@@ -764,6 +790,48 @@ class SidebarWidget(QWidget):
             self.tree.viewport().update()
         QTimer.singleShot(100, lambda: self.tree.updateGeometry())
 
+    def select_note(self, obj_name):
+        """
+        Highlights and scrolls to the specified note in the tree.
+        Plan v12.7: Highlights BOTH pinned and folder instances.
+        """
+        if not obj_name:
+            return
+
+        if self.search_bar.isVisible():
+            return
+
+        # 1. Block signals to prevent recursive "note_selected" triggers
+        self.tree.blockSignals(True)
+        self.tree.clearSelection()
+        
+        found_any = False
+        
+        # 2. Iterate all items (O(N) for select_note is acceptable for tab sync)
+        # to find all instances (e.g. pinned + folder copy)
+        from PyQt6.QtWidgets import QTreeWidgetItemIterator
+        it = QTreeWidgetItemIterator(self.tree)
+        while it.value():
+            item = it.value()
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            # PLAN V12.7 FIX: Data is a dict, extract 'obj_name'
+            if isinstance(data, dict) and data.get("obj_name") == obj_name:
+                item.setSelected(True)
+                # Expand parents
+                p = item.parent()
+                while p:
+                    p.setExpanded(True)
+                    p = p.parent()
+                
+                # Only scroll to the first one (usually folder copy, or pinned if top)
+                if not found_any:
+                    self.tree.setCurrentItem(item)
+                    self.tree.scrollToItem(item, QTreeWidget.ScrollHint.PositionAtCenter)
+                    found_any = True
+            it += 1
+            
+        self.tree.blockSignals(False)
+
     def _highlight_keyword(self, text, keyword):
         """Wraps occurrences of keyword in the text with yellow highlight HTML."""
         if not keyword:
@@ -789,16 +857,24 @@ class SidebarWidget(QWidget):
         
         if data["type"] == "note":
             obj_name = data["obj_name"]
-            if self.note_service.rename_note(obj_name, new_text):
+            actual_title = self.note_service.rename_note(obj_name, new_text)
+            if actual_title:
+                 # Plan v12.7: Update with potentially auto-numbered title
+                 if actual_title != new_text:
+                     item.setText(0, actual_title)
+                 
                  # Sync to storage (Async)
                  self.note_service.save_to_disk()
                  # Emit signal so MainWindow can update Dock Title
-                 self.note_renamed.emit(obj_name, new_text)
+                 # Emitting 'actual_title' ensures other components stay in sync
+                 self.note_renamed.emit(obj_name, actual_title)
                  
         elif data["type"] == "folder":
+            # Strip count suffix "(N)" from UI text to get the actual folder name
+            clean_new_text = re.sub(r"\s\(\d+\)$", "", new_text)
             old_name = data["name"]
-            if new_text != old_name:
-                if self.note_service.rename_folder(old_name, new_text):
+            if clean_new_text != old_name and clean_new_text.strip():
+                if self.note_service.rename_folder(old_name, clean_new_text):
                     # Smart Update: Update internal data, don't rebuild tree
                     data["name"] = new_text
                     item.setData(0, Qt.ItemDataRole.UserRole, data)
@@ -867,6 +943,10 @@ class SidebarWidget(QWidget):
             folder = note.get("folder", "General")
             if folder not in groups:
                 groups[folder] = []
+            
+            if note.get("is_placeholder"):
+                continue
+                
             groups[folder].append(note)
         return groups
 
@@ -973,10 +1053,11 @@ class SidebarWidget(QWidget):
         # Legacy fallback, redirect to batch logic
         self.delete_selected_items()
 
-    def add_new_note(self, folder=None):
+    def add_new_note(self, folder=None, is_open=1, is_placeholder=0):
         """Adds a new note. If folder is None, uses currently selected item's folder."""
         target_folder = folder
         
+        # ... (rest of folder logic) ...
         if not target_folder:
             item = self.tree.currentItem()
             if item:
@@ -988,62 +1069,47 @@ class SidebarWidget(QWidget):
                         # Find parent folder of the note
                         parent = item.parent()
                         if parent:
-                            target_folder = parent.text(0)
+                            parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                            if parent_data and parent_data.get("type") == "folder":
+                                target_folder = parent_data.get("name")
+                            else:
+                                target_folder = parent.text(0).split(' (')[0]
         
         if not target_folder:
             target_folder = "General"
 
         # Create new note via service
-        note_data = self.note_service.add_note(title="New Note", content="", folder=target_folder)
+        note_data = self.note_service.add_note(
+            title="New Note", 
+            content="", 
+            folder=target_folder, 
+            is_open=is_open,
+            is_placeholder=is_placeholder
+        )
         self.note_service.save_to_disk()
         
-        # self.refresh_tree() -> Replace with Smart Insert
-        # Find the folder item
-        folder_item = None
-        
-        # 1. Search top level items
-        for i in range(self.tree.topLevelItemCount()):
-            tl_item = self.tree.topLevelItem(i)
-            tl_data = tl_item.data(0, Qt.ItemDataRole.UserRole)
-            if tl_data and tl_data.get("type") == "folder" and tl_data.get("name") == target_folder:
-                folder_item = tl_item
-                break
-        
-        # 2. If not found (e.g. new folder created implicitly, causing refresh anyway), refresh
-        if not folder_item:
-             self.refresh_tree()
-             return
-
-        # 3. Add child item
-        base_icon_path = self._get_base_icon_path()
-        note_icon = QIcon(os.path.join(base_icon_path, "note.svg"))
-        
-        note_item = QTreeWidgetItem(folder_item)
-        note_item.setText(0, note_data["title"])
-        note_item.setIcon(0, note_icon)
-        note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": note_data["obj_name"]})
-        note_item.setToolTip(0, "")
-        note_item.setFlags(note_item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
-        note_item.setFlags(note_item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
-        
-        folder_item.setExpanded(True)
-        
-        # Update folder count text
-        self.tree.blockSignals(True)
-        current_count = folder_item.childCount()
-        folder_item.setText(0, f"{target_folder} ({current_count})")
-        self.tree.blockSignals(False)
-
-        self.tree.setCurrentItem(note_item)
-        self.note_selected.emit(note_data["obj_name"]) # Open it
+        if is_open and self.main_window:
+            # We call the MainWindow method which handles both UI (Dock) and Sidebar Refresh
+            self.main_window.add_note_dock(
+                obj_name=note_data["obj_name"], 
+                title=note_data["title"], 
+                content=""
+            )
+            # After refresh, highlight it
+            self.select_note(note_data["obj_name"])
+        else:
+            # Background creation for folders
+            self.refresh_tree()
+            self.select_note(note_data["obj_name"])
 
     def add_new_folder(self):
         """Prompts user for folder name and creates a placeholder note in it."""
         folder_name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
-        if ok and folder_name:
-            # Create a placeholder note to "persist" the folder
-            self.add_new_note(folder=folder_name)
-
+        if ok and folder_name.strip():
+            # 1. Create a hidden placeholder to ensure folder existence
+            self.add_new_note(folder=folder_name.strip(), is_open=0, is_placeholder=1)
+            # 2. Automatically create and open a default visible note for the user
+            self.add_new_note(folder=folder_name.strip(), is_open=1, is_placeholder=0)
     def show_context_menu(self, position):
         items = self.tree.selectedItems()
         menu = QMenu()
@@ -1064,10 +1130,25 @@ class SidebarWidget(QWidget):
             base_icon_path = self._get_base_icon_path()
             
             if item_type == "folder":
+                folder_name = data.get("name")
+                is_folder_locked = self.note_service.is_folder_locked(folder_name)
+                
                 icon_path = os.path.join(base_icon_path, "note-add.svg")
                 add_note_act = QAction(QIcon(icon_path), "New Note Here", self)
-                add_note_act.triggered.connect(lambda: self.add_new_note(folder=data.get("name")))
+                add_note_act.triggered.connect(lambda: self.add_new_note(folder=folder_name))
+                if is_folder_locked:
+                    add_note_act.setEnabled(False) # Prevent creating unprotected notes in locked folder
                 menu.addAction(add_note_act)
+                
+                menu.addSeparator()
+                
+                # Lock/Unlock Folder Action
+                lock_text = "Unlock Folder" if is_folder_locked else "Lock Folder"
+                lock_icon_name = "unlock.svg" if is_folder_locked else "lock.svg"
+                lock_icon = QIcon(os.path.join(base_icon_path, lock_icon_name))
+                lock_folder_act = QAction(lock_icon, lock_text, self)
+                lock_folder_act.triggered.connect(lambda: self.toggle_folder_lock(folder_name, is_folder_locked))
+                menu.addAction(lock_folder_act)
                 
                 menu.addSeparator()
                 
@@ -1102,13 +1183,23 @@ class SidebarWidget(QWidget):
                 # Pin/Unpin Action
                 obj_name = data["obj_name"]
                 note = self.note_service.get_note_by_id(obj_name)
-                is_pinned = note.get("is_pinned", False) if note else False
                 
+                # Pin logic
+                is_pinned = note.get("pinned", 0) if note else False
                 pin_text = "Unpin Note" if is_pinned else "Pin Note"
                 pin_icon = QIcon(os.path.join(base_icon_path, "pin.svg"))
                 pin_act = QAction(pin_icon, pin_text, self)
                 pin_act.triggered.connect(lambda: self.toggle_note_pin(obj_name))
                 menu.addAction(pin_act)
+                
+                # Lock/Unlock Action
+                is_locked = note.get("is_locked", 0) if note else False
+                lock_text = "Unlock Note" if is_locked else "Lock Note"
+                lock_icon_name = "unlock.svg" if is_locked else "lock.svg"
+                lock_icon = QIcon(os.path.join(base_icon_path, lock_icon_name))
+                lock_act = QAction(lock_icon, lock_text, self)
+                lock_act.triggered.connect(lambda: self.toggle_note_lock(obj_name))
+                menu.addAction(lock_act)
                 
                 menu.addSeparator()
                         
@@ -1154,3 +1245,67 @@ class SidebarWidget(QWidget):
         self.note_service.toggle_pin(obj_name)
         self.note_service.save_to_disk()
         self.refresh_tree()
+
+    def toggle_note_lock(self, obj_name):
+        """Handles locking/unlocking a note with UI dialogs."""
+        note = self.note_service.get_note_by_id(obj_name)
+        if not note: return
+        
+        is_locked = note.get("is_locked", 0)
+        
+        if is_locked:
+            # Unlock logic
+            is_dark = getattr(self.main_window.theme_manager, "is_dark_mode", True) if self.main_window else True
+            pwd, ok = PasswordDialog.get_input(self, "Unlock Note", "Enter password:", is_dark=is_dark)
+            if ok:
+                if self.note_service.unlock_note(obj_name, pwd):
+                    self.note_service.save_to_disk()
+                    self.refresh_tree()
+                    self.statusBar_msg(f"Note '{note['title']}' unlocked.")
+                else:
+                    QMessageBox.warning(self, "Error", "Incorrect password.")
+        else:
+            # Lock logic
+            is_dark = getattr(self.main_window.theme_manager, "is_dark_mode", True) if self.main_window else True
+            pwd, ok = PasswordDialog.get_input(self, "Lock Note", "Set password for this note:", is_dark=is_dark)
+            if ok and pwd:
+                confirm_pwd, ok2 = PasswordDialog.get_input(self, "Lock Note", "Confirm password:", is_dark=is_dark)
+                if ok2:
+                    if pwd == confirm_pwd:
+                        self.note_service.lock_note(obj_name, pwd)
+                        self.note_service.save_to_disk()
+                        self.refresh_tree()
+                        self.statusBar_msg(f"Note '{note['title']}' locked.")
+
+    def toggle_folder_lock(self, folder_name, is_locked):
+        """Handles locking/unlocking all notes in a folder with UI dialogs."""
+        is_dark = getattr(self.main_window.theme_manager, "is_dark_mode", True) if getattr(self, "main_window", None) else True
+        
+        if is_locked:
+            pwd, ok = PasswordDialog.get_input(self, "Unlock Folder", f"Enter password to unlock '{folder_name}':", is_dark=is_dark)
+            if ok:
+                if self.note_service.unlock_folder(folder_name, pwd):
+                    self.note_service.save_to_disk()
+                    self.refresh_tree()
+                    self.statusBar_msg(f"Folder '{folder_name}' unlocked.")
+                else:
+                    QMessageBox.warning(self, "Error", "Incorrect password or partial unlock failure.")
+        else:
+            pwd, ok = PasswordDialog.get_input(self, "Lock Folder", f"Set password to lock ALL notes in '{folder_name}':", is_dark=is_dark)
+            if ok and pwd:
+                confirm_pwd, ok2 = PasswordDialog.get_input(self, "Lock Folder", "Confirm password:", is_dark=is_dark)
+                if ok2:
+                    if pwd == confirm_pwd:
+                        if self.note_service.lock_folder(folder_name, pwd):
+                            self.note_service.save_to_disk()
+                            self.refresh_tree()
+                            self.statusBar_msg(f"Folder '{folder_name}' locked.")
+                        else:
+                            QMessageBox.information(self, "Info", "Folder is empty, nothing to lock.")
+                    else:
+                        QMessageBox.warning(self, "Error", "Passwords do not match.")
+
+    def statusBar_msg(self, msg):
+        """Sends a message to the main status bar if available."""
+        if self.main_window and hasattr(self.main_window, 'status_bar_manager'):
+            self.main_window.statusBar().showMessage(msg, 3000)

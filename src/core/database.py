@@ -72,6 +72,9 @@ class DatabaseManager:
                 folder TEXT DEFAULT 'General',
                 pinned INTEGER DEFAULT 0,
                 is_open INTEGER DEFAULT 1,
+                is_locked INTEGER DEFAULT 0,
+                is_placeholder INTEGER DEFAULT 0,
+                password_hash TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -83,6 +86,15 @@ class DatabaseManager:
             if "is_open" not in columns:
                 logging.info("DatabaseManager: Migrating schema - adding 'is_open' to 'notes' table.")
                 cursor.execute("ALTER TABLE notes ADD COLUMN is_open INTEGER DEFAULT 1;")
+            if "is_locked" not in columns:
+                logging.info("DatabaseManager: Migrating schema - adding 'is_locked' to 'notes' table.")
+                cursor.execute("ALTER TABLE notes ADD COLUMN is_locked INTEGER DEFAULT 0;")
+            if "password_hash" not in columns:
+                logging.info("DatabaseManager: Migrating schema - adding 'password_hash' to 'notes' table.")
+                cursor.execute("ALTER TABLE notes ADD COLUMN password_hash TEXT;")
+            if "is_placeholder" not in columns:
+                logging.info("DatabaseManager: Migrating schema - adding 'is_placeholder' to 'notes' table.")
+                cursor.execute("ALTER TABLE notes ADD COLUMN is_placeholder INTEGER DEFAULT 0;")
 
             # 3. Notes Content Table (BLOB/HTML)
             cursor.execute("""
@@ -159,6 +171,17 @@ class DatabaseManager:
                 title TEXT,
                 url TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # 7. Note Links Table (Plan v12.6: For Knowledge Graph)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS note_links (
+                source_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                FOREIGN KEY(source_id) REFERENCES notes(id) ON DELETE CASCADE,
+                FOREIGN KEY(target_id) REFERENCES notes(id) ON DELETE CASCADE,
+                PRIMARY KEY(source_id, target_id)
             );
             """)
 

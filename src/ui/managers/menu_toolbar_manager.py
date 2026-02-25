@@ -18,6 +18,7 @@ class MenuToolbarManager:
         self.highlight_color_btn = None
         self.label_ghost = None
         self.opacity_label = None # To display percentage
+        self.opacity_slider = None
         
     def setup_actions(self):
         """Creates all QActions and stores them."""
@@ -228,8 +229,8 @@ class MenuToolbarManager:
 
         # ── Text Color Button ────────────────────────────────────────────
         from PyQt6.QtGui import QColor as _QC, QPixmap as _QP, QPainter as _QPn, QFont as _QFo
-        self.text_color_btn = QPushButton("")
-        self.text_color_btn.setFixedSize(24, 24)
+        self.text_color_btn = QToolButton()
+        self.text_color_btn.setAutoRaise(True)
         self.text_color_btn.setToolTip("Text Color")
         self.text_color_btn._letter = "A"
         self._draw_color_icon(self.text_color_btn, _QC("black"))
@@ -237,8 +238,8 @@ class MenuToolbarManager:
         toolbar.addWidget(self.text_color_btn)
 
         # ── Highlight Color Button ───────────────────────────────────────
-        self.highlight_color_btn = QPushButton("")
-        self.highlight_color_btn.setFixedSize(24, 24)
+        self.highlight_color_btn = QToolButton()
+        self.highlight_color_btn.setAutoRaise(True)
         self.highlight_color_btn.setToolTip("Highlight Color")
         self.highlight_color_btn._letter = "H"
         self._draw_color_icon(self.highlight_color_btn, _QC("yellow"))
@@ -269,21 +270,23 @@ class MenuToolbarManager:
         search_btn = QToolButton()
         search_btn.setDefaultAction(self.actions["search"])
         search_btn.setFixedSize(22, 22) 
-        search_btn.setStyleSheet("margin: 0px; padding: 0px; border: none;")
+        # Alignment here matches the layout
         right_layout.addWidget(search_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # 2. Opacity Cluster
-        opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        opacity_slider.setRange(20, 100)
-        opacity_slider.setValue(100)
-        opacity_slider.setFixedWidth(40) 
-        opacity_slider.valueChanged.connect(self.main_window.change_window_opacity)
-        right_layout.addWidget(opacity_slider)
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(10, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.setFixedWidth(40) 
+        self.opacity_slider.setToolTip("Window Opacity (Ctrl+Shift+G for Ghost Mode)")
+        self.opacity_slider.valueChanged.connect(self.main_window.change_window_opacity)
+        right_layout.addWidget(self.opacity_slider)
         
         self.opacity_label = QLabel("100%")
         self.opacity_label.setFixedWidth(30)
+        self.opacity_label.setToolTip("Current Opacity %")
         self.opacity_label.setStyleSheet("font-size: 9px; color: gray;")
-        opacity_slider.valueChanged.connect(lambda v: self.opacity_label.setText(f"{v}%"))
+        self.opacity_slider.valueChanged.connect(lambda v: self.opacity_label.setText(f"{v}%"))
         right_layout.addWidget(self.opacity_label)
         
         # 3. Ghost Icon
@@ -468,23 +471,25 @@ class MenuToolbarManager:
             text_color = QColor(240, 240, 240) if is_dark else QColor(40, 40, 40)
 
         letter = getattr(btn, '_letter', None) or "A"
-        px = QPixmap(24, 24)
+        px = QPixmap(20, 20)
         px.fill(QColor(0, 0, 0, 0))
         p = QPainter(px)
         f = _QF()
         f.setBold(True)
-        f.setPointSize(12)
+        f.setPointSize(10) # Scaled for 20px
         p.setFont(f)
         
         p.setPen(text_color)
-        p.drawText(0, 0, 24, 20, Qt.AlignmentFlag.AlignCenter, letter)
+        # Centered vertically in 20x20 (Top=0, Height=20)
+        p.drawText(0, 0, 20, 20, Qt.AlignmentFlag.AlignCenter, letter)
         
         bar_color = color if (color.isValid() and color.alpha() > 0) else QColor("transparent")
-        p.fillRect(2, 20, 20, 4, bar_color)
+        # Bar anchored at bottom (Y=17) for clear visual underline
+        p.fillRect(3, 17, 14, 2, bar_color)
         p.end()
         
         btn.setIcon(QIcon(px))
-        btn.setIconSize(QSize(24, 24))
+        btn.setIconSize(QSize(20, 20))
         
         # Update tooltip with Hex code for better UX
         if color.isValid() and color.alpha() > 0:

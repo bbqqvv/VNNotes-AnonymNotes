@@ -2,6 +2,7 @@ import os
 import logging
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QDockWidget
+from PyQt6 import sip
 
 from src.core.reader import UniversalReader
 from src.core.version import check_for_updates, CURRENT_VERSION
@@ -53,9 +54,11 @@ class DialogManager:
             pane.file_path = path
             # Update dock title to match new filename
             for dock in self.mw.findChildren(QDockWidget):
-                if dock.widget() == pane:
-                    dock.setWindowTitle(os.path.basename(path))
-                    break
+                try:
+                    if not sip.isdeleted(dock) and dock.widget() == pane:
+                        dock.setWindowTitle(os.path.basename(path))
+                        break
+                except RuntimeError: continue
             if hasattr(self.mw, 'sidebar'):
                 self.mw.sidebar.refresh_tree()
 
@@ -149,9 +152,11 @@ class DialogManager:
         if not self.mw.active_pane:
             return
         for dock in self.mw.findChildren(QDockWidget):
-            if dock.widget() == self.mw.active_pane:
-                self.show_rename_dialog(dock)
-                break
+            try:
+                if not sip.isdeleted(dock) and dock.widget() == self.mw.active_pane:
+                    self.show_rename_dialog(dock)
+                    break
+            except RuntimeError: continue
 
     def show_rename_dialog(self, dock):
         from PyQt6.QtWidgets import QInputDialog

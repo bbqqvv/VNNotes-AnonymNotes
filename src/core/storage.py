@@ -27,18 +27,23 @@ class StorageManager(QObject):
         self.db = DatabaseManager()
         logging.info("StorageManager initialized with SQLite Database Backend.")
 
-    def get_all_notes(self, only_open=False):
+    def get_all_notes(self, only_open=False, include_placeholders=False):
         """Fetches notes metadata from the database as a list of dicts. Optional session filtering."""
         conn = self.db.get_connection()
         cursor = conn.cursor()
         try:
             sql = "SELECT * FROM notes"
-            params = []
+            conditions = []
             if only_open:
-                sql += " WHERE is_open = 1"
+                conditions.append("is_open = 1")
+            if not include_placeholders:
+                conditions.append("is_placeholder = 0")
+            
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
             
             sql += " ORDER BY pinned DESC, updated_at DESC"
-            cursor.execute(sql, params)
+            cursor.execute(sql)
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
         except Exception as e:
@@ -57,6 +62,35 @@ class StorageManager(QObject):
             logging.error(f"StorageManager.get_note_by_obj_name Error: {e}")
             return None
 
+    # ── App Settings DAO ─────────────────────────────────────────────
+    
+    def get_app_setting(self, key, default_value=None):
+        """Fetches a JSON string or value from the app_settings table."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else default_value
+        except Exception as e:
+            logging.error(f"StorageManager.get_app_setting Error: {e}")
+            return default_value
+
+    def set_app_setting(self, key, value):
+        """Sets a key-value pair in the app_settings table."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT 1 FROM app_settings WHERE key = ?", (key,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE app_settings SET value = ? WHERE key = ?", (value, key))
+            else:
+                cursor.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)", (key, value))
+            return True
+        except Exception as e:
+            logging.error(f"StorageManager.set_app_setting Error: {e}")
+            return False
+
     def upsert_note_metadata(self, note_dict):
         """Inserts or updates note metadata in the DB."""
         conn = self.db.get_connection()
@@ -64,26 +98,38 @@ class StorageManager(QObject):
         try:
             obj_name = note_dict.get("obj_name")
             title = note_dict.get("title", "")
-            folder = note_dict.get("folder", "General")
             pinned = note_dict.get("pinned", 0)
-            # Default to current value if not provided in dict, to prevent accidental closure
             is_open = note_dict.get("is_open", 1) 
+            is_placeholder = note_dict.get("is_placeholder", 0)
 
             # Check if exists
-            cursor.execute("SELECT id FROM notes WHERE obj_name = ?", (obj_name,))
+            cursor.execute("SELECT id, folder, is_locked, password_hash, is_placeholder FROM notes WHERE obj_name = ?", (obj_name,))
             existing = cursor.fetchone()
 
             if existing: # Update
+                # [ROOT CAUSE FIX] Preserve existing folder if not provided in sync
+                # This prevents partial UI syncs from resetting notes to 'General'.
+                folder = note_dict.get("folder", existing["folder"])
+                
+                # Preserve existing lock/placeholder info if not provided
+                is_locked = note_dict.get("is_locked", existing["is_locked"])
+                password_hash = note_dict.get("password_hash", existing["password_hash"])
+                is_placeholder = note_dict.get("is_placeholder", existing["is_placeholder"])
+                
                 cursor.execute("""
                     UPDATE notes 
-                    SET title = ?, folder = ?, pinned = ?, is_open = ?, updated_at = CURRENT_TIMESTAMP
+                    SET title = ?, folder = ?, pinned = ?, is_open = ?, is_locked = ?, is_placeholder = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE obj_name = ?
-                """, (title, folder, pinned, is_open, obj_name))
+                """, (title, folder, pinned, is_open, is_locked, is_placeholder, password_hash, obj_name))
             else: # Insert
+                # Default to General only for NEW notes
+                folder = note_dict.get("folder", "General")
+                is_locked = note_dict.get("is_locked", 0)
+                password_hash = note_dict.get("password_hash")
                 cursor.execute("""
-                    INSERT INTO notes (obj_name, title, folder, pinned, is_open)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (obj_name, title, folder, pinned, is_open))
+                    INSERT INTO notes (obj_name, title, folder, pinned, is_open, is_locked, is_placeholder, password_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (obj_name, title, folder, pinned, is_open, is_locked, is_placeholder, password_hash))
             
             return True
         except Exception as e:
@@ -316,3 +362,55 @@ class StorageManager(QObject):
     def save_data(self, data, async_save=True):
         """Legacy compatibility hook for monolithic save. Ignored as everything goes via upsert_note_metadata."""
         return True
+
+    def update_note_links(self, source_obj_name, target_obj_names):
+        """Updates the graph for a specific note."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN;")
+            
+            # Get source ID
+            cursor.execute("SELECT id FROM notes WHERE obj_name = ?", (source_obj_name,))
+            source_row = cursor.fetchone()
+            if not source_row:
+                cursor.execute("ROLLBACK;")
+                return False
+            source_id = source_row[0]
+            
+            # Delete old links
+            cursor.execute("DELETE FROM note_links WHERE source_id = ?", (source_id,))
+            
+            # Add new links
+            for t_obj_name in target_obj_names:
+                cursor.execute("SELECT id FROM notes WHERE obj_name = ?", (t_obj_name,))
+                target_row = cursor.fetchone()
+                if target_row:
+                    target_id = target_row[0]
+                    # Use INSERT OR IGNORE just in case of duplicate references in HTML
+                    cursor.execute("INSERT OR IGNORE INTO note_links (source_id, target_id) VALUES (?, ?)", (source_id, target_id))
+            
+            cursor.execute("COMMIT;")
+            return True
+        except Exception as e:
+            conn.execute("ROLLBACK;")
+            logging.error(f"StorageManager.update_note_links Error: {e}")
+            return False
+
+    def get_backlinks(self, obj_name):
+        """Returns a list of notes that link TO the specified note."""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT n.obj_name, n.title, n.folder
+                FROM notes n
+                JOIN note_links l ON l.source_id = n.id
+                JOIN notes t ON t.id = l.target_id
+                WHERE t.obj_name = ?
+            """, (obj_name,))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logging.error(f"StorageManager.get_backlinks Error: {e}")
+            return []

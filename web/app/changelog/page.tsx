@@ -14,18 +14,38 @@ export default function Changelog() {
                 </div>
 
                 <div className="space-y-12">
+                    {/* Version 2.0.0 */}
+                    <ChangelogEntry
+                        version="v2.0.0"
+                        date="February 25, 2026"
+                        isLatest={true}
+                    >
+                        <ul className="list-disc list-inside space-y-3 text-neutral-300">
+                            <li><strong className="text-white">Big Update – Core Architecture:</strong> Successfully migrated the entire backend to <strong className="text-emerald-400">SQLite</strong> for military-grade data reliability and blazing-fast search speeds.</li>
+                            <li><strong className="text-white">UI Evolution:</strong> Reimagined user interface with a more intuitive and friendly design, focused on professional focus and ease of use.</li>
+                            <li><strong className="text-white">Auto-Grid Layout:</strong> New feature to automatically divide your notes into smart grids, perfect for multi-tasking and comparing research data.</li>
+                            <li><strong className="text-white">Improved Prompter:</strong> Enhanced teleprompter logic with smoother scrolling and better visibility controls for high-stakes presentations.</li>
+                            <li><strong className="text-white">Smarter Sidebar:</strong> Redesigned sidebar with intelligent organization and faster navigation across your entire note library.</li>
+                            <li><strong className="text-white">10+ Built-in Themes:</strong> Personalize your workspace with over 10 professionally curated themes, from deep space dark to clean paper light.</li>
+                            <li><strong className="text-white">Advanced Rich Text:</strong> Complete control over your content with new options for text color, background highlights (text-bg), and granular font size adjustments.</li>
+                            <li><strong className="text-white">Fluid Zoom:</strong> Integrated scroll-in/out (Zoom) functionality for effortless reading and navigation of long documents.</li>
+                            <li><strong className="text-white">Controlled Invisibility:</strong> Improved Anti-Capture mode now stays off by default and only activates when you explicitly need it, saving system resources.</li>
+                            <li><strong className="text-white">Performance & Fixes:</strong> Massive code logic refactoring for a "butter-smooth" experience. Fixed dozens of micro-bugs including the redundant note restoration glitch.</li>
+                        </ul>
+                    </ChangelogEntry>
+
                     {/* Version 1.1.1 */}
                     <ChangelogEntry
                         version="v1.1.1"
                         date="February 20, 2026"
-                        isLatest={true}
+                        isLatest={false}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">Fix – Built-in Browser Disappears:</strong> Pressing <kbd className="bg-white/10 px-1 rounded text-xs">Ctrl+Shift+Space</kbd> twice in a row used to make the built-in browser window vanish completely. Now fixed.</li>
-                            <li><strong className="text-white">Fix – Layout Breaks on Right-Click:</strong> Right-clicking inside the browser sometimes caused the app layout to shift or break. This has been fully resolved.</li>
-                            <li><strong className="text-white">Fix – App Crashes on Next Launch:</strong> In some cases — such as a force-close or unexpected shutdown — saved data could become corrupted, causing the app to crash on the next start. The app now automatically detects and recovers from this without losing important data.</li>
-                            <li><strong className="text-white">Fix – Search Bar Shows White in Dark Mode:</strong> The Search/Find input box appeared with a bright white background when using dark mode, looking completely out of place. Now correctly styled to match the dark theme.</li>
-                            <li><strong className="text-white">Improvement – More Reliable Saving on Windows:</strong> The file saving system has been upgraded to work better on Windows 10/11, especially on machines running antivirus or security software in the background — reducing the risk of data loss during save.</li>
+                            <li><strong className="text-white">Fixed – Browser Persistence:</strong> Resolved a critical race condition where rapid toggling of the built-in browser via shortcut caused immediate window termination.</li>
+                            <li><strong className="text-white">Fixed – Context Menu Collision:</strong> Eliminated layout displacement artifacts triggered by the native browser context menu, ensuring UI alignment integrity.</li>
+                            <li><strong className="text-white">Improved – Fault-Tolerance:</strong> Implemented automatic database integrity checks and recovery protocols to prevent startup failure following improper application termination.</li>
+                            <li><strong className="text-white">Improved – Windows Filesystem Integration:</strong> Optimized file-locking mechanisms for improved compatibility with real-time antivirus scanning on Windows 10/11.</li>
+                            <li><strong className="text-white">Styled – Dark Mode Consistency:</strong> Corrected theme mismatch in the Search/Find interface; input elements now dynamically inherit the active dark mode palette.</li>
                         </ul>
                     </ChangelogEntry>
 
@@ -36,12 +56,11 @@ export default function Changelog() {
                         isLatest={false}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">New Sidebar:</strong> Brand-new collapsible note tree sidebar for fast file navigation — create folders, notes, and switch between them instantly.</li>
-                            <li><strong className="text-white">Quick Actions Toolbar:</strong> One-click shortcuts for all common actions (new note, new folder, collapse all, refresh) right in the sidebar header.</li>
-                            <li><strong className="text-white">Performance Optimization:</strong> Major refactor of core architecture — faster startup, smoother tab switching, and lower memory usage.</li>
-                            <li><strong className="text-white">Stability Fix:</strong> Resolved a crash on launch caused by missing QtWebEngine dependencies after install.</li>
-                            <li><strong className="text-white">Clean Install Experience:</strong> Resources folder is now hidden post-install for a professional directory layout.</li>
-                            <li><strong className="text-white">Branding Polish:</strong> VTech icon now correctly displayed in the Windows taskbar and Start Menu via AppUserModelID.</li>
+                            <li><strong className="text-white">New – Intelligent Sidebar:</strong> Introduced a high-performance, collapsible navigation tree supporting nested hierarchies and rapid session switching.</li>
+                            <li><strong className="text-white">New – Productivity Toolbar:</strong> Integrated a centralized action header for immediate access to document creation, global search, and UI state management.</li>
+                            <li><strong className="text-white">Optimized – Core Engine:</strong> Refactored the internal signals-and-slots architecture, resulting in tangible reductions in CPU overhead and faster UI response times.</li>
+                            <li><strong className="text-white">Improved – Distribution Layout:</strong> Standardized the installation directory structure to follow professional software conventions, ensuring system resources remain encapsulated.</li>
+                            <li><strong className="text-white">Styled – OS Branding:</strong> Full integration with the Windows shell; high-definition iconography now renders correctly in the Taskbar, Start Menu, and System Tray.</li>
                         </ul>
                     </ChangelogEntry>
 
@@ -52,11 +71,11 @@ export default function Changelog() {
                         isLatest={false}
                     >
                         <ul className="list-disc list-inside space-y-3 text-neutral-300">
-                            <li><strong className="text-white">Phantom Invisibility:</strong> Advanced Anti-Capture technology to bypass Zoom, Teams, and OBS.</li>
-                            <li><strong className="text-white">Multi-Document Workspace:</strong> Manage multiple notes and scripts simultaneously with an intuitive tab system.</li>
-                            <li><strong className="text-white">Ultra-Hub Dock:</strong> Integrated Mini-Browser and Smart-Paste Clipboard for lethal productivity.</li>
-                            <li><strong className="text-white">Meeting Master Teleprompter:</strong> Professional floating prompts for high-stakes presentations.</li>
-                            <li><strong className="text-white">Standalone Private Vault:</strong> 100% local data storage with zero telemetry or tracking.</li>
+                            <li><strong className="text-white">Anti-Capture Engine:</strong> Proprietary hardware-accelerated invisibility mode for seamless operation during Zoom, Microsoft Teams, and OBS recording.</li>
+                            <li><strong className="text-white">Professional Workspace:</strong> Multi-tabbed document architecture designed for high-stakes presentations and real-time script management.</li>
+                            <li><strong className="text-white">Integrated Ultra-Hub:</strong> A combined toolset featuring a low-latency mini-browser and a smart-paste clipboard for instantaneous data retrieval.</li>
+                            <li><strong className="text-white">Strategic Teleprompter:</strong> Professional-grade floating overlay with transparency controls, optimized for maintaining eye contact during video delivery.</li>
+                            <li><strong className="text-white">Privacy-First Storage:</strong> 100% localized data encryption with zero external dependencies, cloud synchronization, or telemetry tracking.</li>
                         </ul>
                     </ChangelogEntry>
                 </div>
@@ -78,11 +97,9 @@ function ChangelogEntry({ version, date, children, isLatest }: { version: string
 
             <div className="flex items-center gap-4 mb-4">
                 <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1 rounded-md">
-                    <Tag className="w-3 h-3 text-emerald-400" />
                     <span className="font-mono font-bold text-emerald-400">{version}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-neutral-500 font-mono uppercase tracking-wider">
-                    <Calendar className="w-3 h-3" />
                     {date}
                 </div>
                 {isLatest && (

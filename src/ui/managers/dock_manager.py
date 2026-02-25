@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QDockWidget, QMessageBox
 from PyQt6.QtCore import Qt
+from PyQt6 import sip
 import uuid
 import logging
 
@@ -52,6 +53,9 @@ class DockManager:
         if hasattr(self.main_window, 'on_content_changed'):
             note_pane.textChanged.connect(self.main_window.on_content_changed)
         
+        # Plan v12.6: Internal link navigation
+        note_pane.internal_link_clicked.connect(self.handle_internal_link)
+        
         dock.setWidget(note_pane)
         
         # ROOT CAUSE FIX: Register signals BEFORE adding to layout or showing.
@@ -81,6 +85,8 @@ class DockManager:
         dock.show()
         if not self.main_window._is_restoring:
             dock.raise_()
+            if hasattr(self.main_window, 'tab_hook_timer'):
+                self.main_window.tab_hook_timer.start(500)
             
         return dock
 
@@ -142,6 +148,8 @@ class DockManager:
         dock.show()
         if not self.main_window._is_restoring:
             dock.raise_()
+            if hasattr(self.main_window, 'tab_hook_timer'):
+                self.main_window.tab_hook_timer.start(500)
         
         # Sidebar refresh
         if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
@@ -181,6 +189,52 @@ class DockManager:
         self._update_dock_identity(dock)
         return dock
 
+    def handle_internal_link(self, obj_name):
+        """Switches to or opens a note from a vnnote:// link."""
+        existing = self.get_dock(obj_name)
+        if existing:
+            existing.show()
+            existing.raise_()
+            existing.setFocus()
+            return
+            
+        # If not open, load from service
+        if hasattr(self.main_window, 'note_service'):
+            note = self.main_window.note_service.get_note_by_id(obj_name)
+            if note:
+                folder_name = note.get("folder", "General")
+                
+                # Security Check (Plan v12.7): Prompt password if the folder is locked
+                if self.main_window.note_service.is_folder_locked(folder_name):
+                    from src.ui.password_dialog import PasswordDialog
+                    from PyQt6.QtWidgets import QMessageBox
+                    # Determine theme mode for dialog styling
+                    is_dark = True
+                    if hasattr(self.main_window, 'theme_manager'):
+                         is_dark = self.main_window.theme_manager.is_dark_mode
+                         
+                    pwd, ok = PasswordDialog.get_input(
+                        self.main_window, 
+                        title=f"Unlock Vault: {folder_name}", 
+                        message=f"Enter password to access linked note:", 
+                        is_dark=is_dark
+                    )
+                    
+                    if not ok or not self.main_window.note_service.unlock_folder(folder_name, pwd):
+                        if ok: # Only show warning if they pressed OK but pwd was wrong
+                            QMessageBox.warning(self.main_window, "Access Denied", "Incorrect password.")
+                        return
+                    # Refresh sidebar to show unlocked folder
+                    if hasattr(self.main_window, 'sidebar'):
+                        self.main_window.sidebar.refresh_tree()
+                        
+                content = self.main_window.note_service.get_note_content(obj_name)
+                self.add_note_dock(
+                    content=content,
+                    title=note.get("title", "Note"),
+                    obj_name=obj_name
+                )
+
     def _register_dock(self, dock):
         obj_name = dock.objectName()
         self._registry[obj_name] = dock
@@ -212,13 +266,19 @@ class DockManager:
             except RuntimeError: pass
 
     def _update_dock_identity(self, dock, title=None):
-        """Plan v5: Embeds the objectName into the ToolTip for 100% accurate tab lookup."""
+        """Clean ToolTip (v7.1 -> v12.7): Adds folder context for notes."""
         try:
             actual_title = title or dock.windowTitle()
             obj_name = dock.objectName()
-            # Identity format: "Title [ID: name]"
-            # Using brackets/prefix makes it easy for TabManager to regex/split
-            dock.setToolTip(f"{actual_title} [ID: {obj_name}]")
+            
+            if obj_name.startswith("NoteDock_") and hasattr(self.main_window, 'note_service'):
+                note = self.main_window.note_service.get_note_by_id(obj_name)
+                if note:
+                    folder = note.get("folder", "General")
+                    dock.setToolTip(f"{actual_title} (Folder: {folder})")
+                    return
+
+            dock.setToolTip(actual_title)
         except RuntimeError: pass
 
     def _on_dock_destroyed(self, dock):
@@ -226,13 +286,19 @@ class DockManager:
         to_remove = [k for k, v in self._registry.items() if v is dock]
         for k in to_remove:
             del self._registry[k]
+        
+        # Guard against MainWindow already being partially torn down
+        if sip.isdeleted(self.main_window):
+            return
 
         try:
             if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
-                self.main_window.sidebar.refresh_tree()
+                # Plan v12.7.2: Skip expensive refresh during batch closing
+                if not getattr(self.main_window, '_is_batch_closing', False):
+                    self.main_window.sidebar.refresh_tree()
             if hasattr(self.main_window, 'check_docks_closed'):
                 self.main_window.check_docks_closed()
-        except RuntimeError: pass
+        except (RuntimeError, AttributeError): pass
 
     # --- Registry Query Helpers ---
 

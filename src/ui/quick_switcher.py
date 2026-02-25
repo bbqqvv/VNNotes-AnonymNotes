@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLineEdit, QListWidget,
                              QListWidgetItem, QApplication, QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QRect, QPoint
 from PyQt6.QtGui import QColor, QFont
+from PyQt6 import sip
 
 class QuickSwitcher(QFrame):
     """
@@ -150,6 +151,7 @@ class QuickSwitcher(QFrame):
         opened_ids = set()
         for dock in main_window.findChildren(QDockWidget):
             try:
+                if sip.isdeleted(dock): continue
                 obj_name = dock.objectName()
                 if obj_name.startswith("NoteDock_"):
                     title = dock.windowTitle()

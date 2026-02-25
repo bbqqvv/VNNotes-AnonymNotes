@@ -4,6 +4,7 @@ import time
 
 from PyQt6.QtWidgets import QDockWidget, QApplication
 from PyQt6.QtCore import Qt, QTimer, QMetaObject, pyqtSlot
+from PyQt6 import sip
 
 from src.core.stealth import StealthManager
 
@@ -63,6 +64,7 @@ class VisibilityManager:
             self.mw.hide()
             for dock in all_docks:
                 try:
+                    if sip.isdeleted(dock): continue
                     # Mark ONLY docks that are actually visible right now
                     if dock.isVisible():
                         dock.setProperty("was_visible_before_hide", True)
@@ -134,3 +136,23 @@ class VisibilityManager:
 
     def change_window_opacity(self, value):
         self.mw.setWindowOpacity(value / 100.0)
+
+    def adjust_window_opacity(self, delta):
+        """Relative adjustment (v7.1): Increments/Decrements by delta percentage."""
+        current = int(self.mw.windowOpacity() * 100)
+        new_val = current + delta
+        # Clamp between 10% and 100%
+        if new_val > 100: new_val = 100
+        if new_val < 10: new_val = 10
+        self.change_window_opacity(new_val)
+        
+        # Plan v7.2: Sync the UI Slider
+        if hasattr(self.mw, 'menu_manager') and self.mw.menu_manager.opacity_slider:
+            # Block signals to prevent recursion since change_window_opacity already called
+            self.mw.menu_manager.opacity_slider.blockSignals(True)
+            self.mw.menu_manager.opacity_slider.setValue(new_val)
+            self.mw.menu_manager.opacity_slider.blockSignals(False)
+            if self.mw.menu_manager.opacity_label:
+                self.mw.menu_manager.opacity_label.setText(f"{new_val}%")
+
+        self.mw.statusBar().showMessage(f"Opacity: {new_val}%", 1500)

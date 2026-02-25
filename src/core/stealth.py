@@ -17,6 +17,8 @@ class StealthManager:
     GWL_EXSTYLE = -20
     WS_EX_TRANSPARENT = 0x00000020
     WS_EX_LAYERED = 0x00080000
+    WS_EX_APPWINDOW = 0x00040000
+    WS_EX_TOOLWINDOW = 0x00000080
 
     @staticmethod
     def set_stealth_mode(hwnd: int, enable: bool = True) -> bool:
@@ -32,9 +34,18 @@ class StealthManager:
         """
         try:
             user32 = ctypes.windll.user32
-            affinity = StealthManager.WDA_EXCLUDEFROMCAPTURE if enable else StealthManager.WDA_NONE
             
+            # 1. Anti-Screen Capture
+            affinity = StealthManager.WDA_EXCLUDEFROMCAPTURE if enable else StealthManager.WDA_NONE
             result = user32.SetWindowDisplayAffinity(hwnd, affinity)
+            
+            # 2. Hide from Taskbar and Alt+Tab
+            style = user32.GetWindowLongW(hwnd, StealthManager.GWL_EXSTYLE)
+            if enable:
+                new_style = (style | StealthManager.WS_EX_TOOLWINDOW) & ~StealthManager.WS_EX_APPWINDOW
+            else:
+                new_style = (style & ~StealthManager.WS_EX_TOOLWINDOW) | StealthManager.WS_EX_APPWINDOW
+            user32.SetWindowLongW(hwnd, StealthManager.GWL_EXSTYLE, new_style)
             
             if result:
                 # logging.debug(f"StealthManager: Stealth mode {'enabled' if enable else 'disabled'} for HWND {hwnd}")

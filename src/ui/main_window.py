@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QLabel, QSizePolicy, QSlider, QSystemTrayIcon, QMenu, QFileDialog,
     QFrame
 )
-from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor, QColor, QPixmap, QPainter
+from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor, QColor, QPixmap, QPainter, QShortcut, QKeySequence
 from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray, QPoint, QEvent
 from PyQt6 import QtCore, sip
 
@@ -43,6 +43,7 @@ from src.core.session_manager import SessionManager
 from src.ui.sidebar import SidebarWidget
 from src.ui.managers.theme_manager import ThemeManager
 from src.ui.quick_switcher import QuickSwitcher
+from src.ui.password_dialog import PasswordDialog
 
 class MainWindow(QMainWindow):
     # Plan v6: Layout Limits (User requested 8-10 capacity)
@@ -138,6 +139,15 @@ class MainWindow(QMainWindow):
         self._content_change_timer = QTimer(self)
         self._content_change_timer.setSingleShot(True)
         self._content_change_timer.timeout.connect(self._do_on_content_changed)
+        
+        # Plan v7.1: Opacity Shortcuts (Ctrl+Alt+Arrow)
+        self.shortcut_opacity_inc = QShortcut(QKeySequence("Ctrl+Alt+Right"), self)
+        self.shortcut_opacity_inc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_opacity_inc.activated.connect(lambda: self.adjust_window_opacity(10))
+
+        self.shortcut_opacity_dec = QShortcut(QKeySequence("Ctrl+Alt+Left"), self)
+        self.shortcut_opacity_dec.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_opacity_dec.activated.connect(lambda: self.adjust_window_opacity(-10))
         
         # 3. Branding Guard: Debounce visibility checks to prevent layout recursion "BÙM"
         self._branding_timer = QTimer(self)
@@ -579,7 +589,7 @@ class MainWindow(QMainWindow):
             
             self.branding.updateGeometry()
             self.branding.update()
-        except Exception as e:
+        except (RuntimeError, Exception) as e:
             logging.error(f"Branding Recovery Failed: {e}")
             self.central_stack.setVisible(True)
 
@@ -668,14 +678,11 @@ class MainWindow(QMainWindow):
     def add_clipboard_dock(self):
         self.dock_manager.add_clipboard_dock(self.clipboard_manager)
 
-    def paste_from_clipboard(self, text):
-        """Sets system clipboard and inserts into active note if possible."""
-        # 1. Update system clipboard
-        self.clipboard_manager.clipboard.setText(text)
-        
-        # 2. Insert into active note
-        if self.active_pane and isinstance(self.active_pane, NotePane):
-            self.active_pane.insertPlainText(text)
+    def paste_from_clipboard(self, item_dict):
+        """Called when an item is selected from the Clipboard dock."""
+        # The QMimeData is already set to the system clipboard by ClipboardPane.
+        if self.active_pane and hasattr(self.active_pane, "paste"):
+            self.active_pane.paste()
             self.statusBar().showMessage("Pasted from clipboard history", 2000)
             self.active_pane.setFocus()
         else:
@@ -705,9 +712,11 @@ class MainWindow(QMainWindow):
             
         # Cache the parent dock to avoid findChildren loops
         for dock in self.findChildren(QDockWidget):
-            if not self._is_dock_deleted(dock) and dock.widget() == pane:
-                self._active_dock = dock
-                break
+            try:
+                if not sip.isdeleted(dock) and dock.widget() == pane:
+                    self._active_dock = dock
+                    break
+            except RuntimeError: continue
         
         # Connect signals: cursor format (toolbar sync) + cursor position (status bar)
         if hasattr(pane, 'cursor_format_changed'):
@@ -719,6 +728,14 @@ class MainWindow(QMainWindow):
             pane.cursorPositionChanged.connect(self.update_status_bar_info)
         except Exception:
             pass
+            
+        # Plan v12.6: Sidebar Sync Highlight (Active Tab tracking)
+        # We use the cached _active_dock to get the obj_name
+        if self._active_dock and hasattr(self, 'sidebar'):
+            obj_name = self._active_dock.objectName()
+            # Only sync if it's a NoteDock to avoid browser/clipboard confusion here
+            if obj_name.startswith("NoteDock_"):
+                self.sidebar.select_note(obj_name)
 
     def _on_cursor_format_changed(self, char_fmt):
         """Update toolbar font size combo and color swatches when cursor moves."""
@@ -901,22 +918,24 @@ class MainWindow(QMainWindow):
 
         # Check if already open
         for dock in self.findChildren(QDockWidget):
-             if dock.objectName() == note_obj_name:
-                 dock.show()
-                 dock.raise_()
-                 
-                 # DIAMOND-STANDARD: Force lazy load if `showEvent` was swallowed by QDockWidget tabification
-                 widget = dock.widget()
-                 if hasattr(widget, "load_deferred_content"):
-                     widget.load_deferred_content()
-                 
-                 # Bring the actual text editor into focus so the typing cursor appears!
-                 if widget:
-                     widget.setFocus()
-                 
-                 # Force visibility re-check to prevent BrandyOverlay glitches
-                 self.check_docks_closed()
-                 return
+             try:
+                 if not sip.isdeleted(dock) and dock.objectName() == note_obj_name:
+                     dock.show()
+                     dock.raise_()
+                     
+                     # DIAMOND-STANDARD: Force lazy load if `showEvent` was swallowed by QDockWidget tabification
+                     widget = dock.widget()
+                     if hasattr(widget, "load_deferred_content"):
+                         widget.load_deferred_content()
+                     
+                     # Bring the actual text editor into focus so the typing cursor appears!
+                     if widget:
+                         widget.setFocus()
+                     
+                     # Force visibility re-check to prevent BrandyOverlay glitches
+                     self.check_docks_closed()
+                     return
+             except RuntimeError: continue
         
         # If not open, restore it from Service
         logging.info(f"Restoring closed note: {note_obj_name}")
@@ -926,6 +945,23 @@ class MainWindow(QMainWindow):
         try:
             note_data = self.note_service.get_note_by_id(note_obj_name)
             if note_data:
+                # ─── LOCKED NOTE HANDLER ───
+                if note_data.get("is_locked"):
+                    self.setUpdatesEnabled(True) # Unfreeze to show dialog
+                    pwd, ok = PasswordDialog.get_input(
+                        self, "Locked Note", 
+                        f"Enter password for '{note_data.get('title', 'Untitled')}':",
+                        is_dark=getattr(self.theme_manager, "is_dark_mode", True)
+                    )
+                    if not ok:
+                        return
+                    
+                    if not self.note_service.verify_note_password(note_obj_name, pwd):
+                        QMessageBox.warning(self, "Error", "Incorrect password.")
+                        return
+                    
+                    self.setUpdatesEnabled(False) # Re-freeze for loading
+
                 # CORRECT: Call self.add_note_dock
                 dock = self.add_note_dock(title=note_data.get("title", "Untitled"), obj_name=note_obj_name)
                 if dock:
@@ -947,7 +983,7 @@ class MainWindow(QMainWindow):
         
         # Then find the dock and highlight
         dock = self.findChild(QDockWidget, obj_name)
-        if dock:
+        if dock and not self._is_dock_deleted(dock):
             pane = dock.widget()
             if hasattr(pane, 'highlight_search_result'):
                 from PyQt6.QtCore import QTimer
@@ -990,13 +1026,13 @@ class MainWindow(QMainWindow):
         """Closes Dock when note is deleted via Sidebar."""
         try:
             dock = self.findChild(QDockWidget, obj_name)
-            if dock and not self._is_dock_deleted(dock):
+            if dock and not sip.isdeleted(dock):
                 dock.close()
             
             # Robust fallback lookup
             for d in self.findChildren(QDockWidget):
                 try:
-                    if not self._is_dock_deleted(d) and d.objectName() == obj_name:
+                    if not sip.isdeleted(d) and d.objectName() == obj_name:
                         d.close()
                 except (RuntimeError, AttributeError):
                     pass
@@ -1135,6 +1171,9 @@ class MainWindow(QMainWindow):
 
     def change_window_opacity(self, value):
         self.visibility_manager.change_window_opacity(value)
+
+    def adjust_window_opacity(self, delta):
+        self.visibility_manager.adjust_window_opacity(delta)
 
     # --- Delegated to DialogManager ---
 

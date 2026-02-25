@@ -12,22 +12,22 @@ class ThemeManager:
         "zinc": {  # Premium Dark
             "bg": "#09090b", "surface": "#18181b", "border": "#27272a", 
             "text": "#f4f4f5", "text_muted": "#a1a1aa", "accent": "#3b82f6",
-            "selection": "#27272a", "hover": "#18181b", "is_dark": True
+            "selection": "#27272a", "hover": "#2a2a2e", "is_dark": True
         },
         "nord": { # Arctic Blue
             "bg": "#2e3440", "surface": "#3b4252", "border": "#434c5e",
             "text": "#eceff4", "text_muted": "#d8dee9", "accent": "#88c0d0",
-            "selection": "#4c566a", "hover": "#3b4252", "is_dark": True
+            "selection": "#4c566a", "hover": "#434c5e", "is_dark": True
         },
         "midnight": { # Deep Navy
             "bg": "#020617", "surface": "#0f172a", "border": "#1e293b",
             "text": "#f1f5f9", "text_muted": "#94a3b8", "accent": "#38bdf8",
-            "selection": "#1e293b", "hover": "#0f172a", "is_dark": True
+            "selection": "#1e293b", "hover": "#1e293b", "is_dark": True
         },
         "solarized": { # Classic Solarized Dark
             "bg": "#002b36", "surface": "#073642", "border": "#586e75",
             "text": "#839496", "text_muted": "#586e75", "accent": "#268bd2",
-            "selection": "#073642", "hover": "#073642", "is_dark": True
+            "selection": "#073642", "hover": "#0c4452", "is_dark": True
         },
         "slate": { # Premium Light
             "bg": "#f8fafc", "surface": "#ffffff", "border": "#e2e8f0",
@@ -37,27 +37,27 @@ class ThemeManager:
         "sepia": { # Reading Mode
             "bg": "#fdf6e3", "surface": "#eee8d5", "border": "#d33682",
             "text": "#586e75", "text_muted": "#93a1a1", "accent": "#b58900",
-            "selection": "#eee8d5", "hover": "#eee8d5", "is_dark": False
+            "selection": "#eee8d5", "hover": "#d8d1bc", "is_dark": False
         },
         "dracula": { # Iconic Purple
             "bg": "#282a36", "surface": "#44475a", "border": "#6272a4",
             "text": "#f8f8f2", "text_muted": "#6272a4", "accent": "#bd93f9",
-            "selection": "#44475a", "hover": "#44475a", "is_dark": True
+            "selection": "#44475a", "hover": "#4d5166", "is_dark": True
         },
         "everforest": { # Organic Green
             "bg": "#2d353b", "surface": "#3d484d", "border": "#475258",
             "text": "#d3c6aa", "text_muted": "#859289", "accent": "#a7c080",
-            "selection": "#3d484d", "hover": "#3d484d", "is_dark": True
+            "selection": "#3d484d", "hover": "#445055", "is_dark": True
         },
         "rose_pine": { # Elegant Serene
             "bg": "#191724", "surface": "#1f1d2e", "border": "#26233a",
             "text": "#e0def4", "text_muted": "#908caa", "accent": "#ebbcba",
-            "selection": "#2a2837", "hover": "#1f1d2e", "is_dark": True
+            "selection": "#2a2837", "hover": "#252235", "is_dark": True
         },
         "gruvbox": { # Retro Comfort
             "bg": "#282828", "surface": "#3c3836", "border": "#504945",
             "text": "#ebdbb2", "text_muted": "#928374", "accent": "#fabd2f",
-            "selection": "#3c3836", "hover": "#3c3836", "is_dark": True
+            "selection": "#3c3836", "hover": "#45403d", "is_dark": True
         }
     }
 
@@ -274,19 +274,19 @@ class ThemeManager:
             QToolBar {{ 
                 background: {c['surface']}; 
                 border-bottom: 1px solid {c['border']}; 
-                padding: 0px;
+                padding: 4px;
                 spacing: 0px;
             }}
-            QToolBar QToolButton {{ 
+            QToolBar QToolButton, QToolBar QPushButton {{ 
                 background: transparent; 
                 border: none;
                 border-radius: 4px; 
-                padding: 4px; 
-                margin: 0 4px;
-                min-width: 28px;
-                min-height: 28px;
+                padding: 3px; 
+                margin: 3px 1px;
+                min-width: 24px;
+                min-height: 24px;
             }}
-            QToolBar QToolButton:hover {{
+            QToolBar QToolButton:hover, QToolBar QPushButton:hover, QToolButton#FormattingButton:hover {{
                 background: {c['hover']};
             }}
             

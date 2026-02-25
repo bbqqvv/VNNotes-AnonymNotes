@@ -81,11 +81,33 @@ class StealthWebView(QWebEngineView):
             else:
                  search_act.triggered.connect(lambda: self.load(QUrl(f"https://www.google.com/search?q={selected_text}")))
 
-        # --- Remove "View Page Source" ---
+        # --- Standard Actions Refinement ---
         from PyQt6.QtWebEngineCore import QWebEnginePage
-        view_source_act = self.page().action(QWebEnginePage.WebAction.ViewSource)
-        if view_source_act in menu.actions():
-            menu.removeAction(view_source_act)
+        
+        # 1. Remove "View Page Source" and "Save Page" using robust attribute checking
+        # Different versions of QtWebEngine have different names for these actions.
+        for attr_name in ["ViewSource", "DownloadPage", "SavePage", "SavePageAs"]:
+            if hasattr(QWebEnginePage.WebAction, attr_name):
+                web_act_type = getattr(QWebEnginePage.WebAction, attr_name)
+                act = self.page().action(web_act_type)
+                if act in menu.actions():
+                    menu.removeAction(act)
+
+        # 2. Iconify Standard Navigation
+        nav_icons = {
+            "Back": "undo.svg",
+            "Forward": "redo.svg",
+            "Reload": "refresh.svg"
+        }
+        
+        for attr_name, icon_name in nav_icons.items():
+            if hasattr(QWebEnginePage.WebAction, attr_name):
+                web_act_type = getattr(QWebEnginePage.WebAction, attr_name)
+                act = self.page().action(web_act_type)
+                if act in menu.actions():
+                    path = os.path.join(icon_dir, icon_name)
+                    if os.path.exists(path):
+                        act.setIcon(QIcon(path))
 
         # Layout: [Ask AI] [Search] [Translate]
         if first_action:

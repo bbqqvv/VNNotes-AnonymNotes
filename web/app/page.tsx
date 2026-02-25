@@ -43,7 +43,7 @@ export default function Home() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            v1.1.1 Stable is now live.
+            v2.0.0 Stable is now live.
           </motion.div>
 
           <motion.h1
@@ -119,34 +119,34 @@ export default function Home() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <FeatureCard
-              icon={<Ghost className="w-6 h-6 text-emerald-400" />}
-              title="Anti-Capture Technology"
-              description="100% invisible to Zoom, Teams, and OBS. Share your screen while keeping your notes, research, and scripts entirely hidden from others."
-            />
-            <FeatureCard
-              icon={<Move className="w-6 h-6 text-orange-400" />}
-              title="Smart Meeting Teleprompter"
-              description="Float transparent scripts over your video calls. Maintain perfect eye contact while delivering your points with absolute confidence."
-            />
-            <FeatureCard
-              icon={<FileText className="w-6 h-6 text-blue-400" />}
-              title="Multi-Document Workspace"
-              description="Manage multiple notes and scripts simultaneously with an intuitive tab system. Switch between interview questions and scripts instantly."
+              icon={<Shield className="w-6 h-6 text-emerald-400" />}
+              title="SQLite Core Architecture"
+              description="Now powered by SQLite for massive performance and reliability. Your notes are stored in a professional database, ensuring zero data loss and lightning-fast search."
             />
             <FeatureCard
               icon={<Zap className="w-6 h-6 text-yellow-400" />}
-              title="Integrated Research Hub"
-              description="Built-in Mini Browser and Smart Clipboard with Auto-Paste. Access documentation and copy-paste answers in real-time."
+              title="Smart Grid Workspace"
+              description="Automatically split your notes into customizable grids. Perfect for multi-tasking, comparing scripts, and managing complex research projects in one view."
+            />
+            <FeatureCard
+              icon={<Move className="w-6 h-6 text-orange-400" />}
+              title="Scroll-In/Out Fluid Zoom"
+              description="Seamlessly zoom in and out of your documents using your mouse scroll. Maintain legibility for long scripts while keeping the UI clean and focused."
+            />
+            <FeatureCard
+              icon={<FileText className="w-6 h-6 text-blue-400" />}
+              title="10+ Professional Themes"
+              description="Choose from over 10 built-in themes to match your environment. From high-contrast dark modes to soft light themes, your workspace stays custom."
             />
             <FeatureCard
               icon={<Globe className="w-6 h-6 text-purple-400" />}
-              title="Fluid Organization"
-              description="Effortless drag-and-drop for images and text. Master your content structure during live presentations without breaking flow."
+              title="Advanced Rich Formatting"
+              description="Full control over text color, background highlights, and font sizes. Format your scripts exactly how you need them for perfect readability."
             />
             <FeatureCard
-              icon={<Shield className="w-6 h-6 text-red-400" />}
-              title="Zero-Trace Privacy"
-              description="Military-grade local storage. Your high-stakes meeting notes and sensitive documents never touch the cloud. 100% private."
+              icon={<Ghost className="w-6 h-6 text-red-500" />}
+              title="Intelligent Invisibility"
+              description="100% invisible to Zoom and Teams. Anti-capture technology now stays off by default, only activating when you need it for maximum efficiency."
             />
           </div>
         </div>
@@ -165,10 +165,10 @@ export default function Home() {
             className="inline-flex items-center gap-2 bg-emerald-600 text-white px-8 py-4 rounded-full font-bold hover:bg-emerald-500 transition-all hover:scale-105 shadow-lg shadow-emerald-500/20"
           >
             <Download className="w-5 h-5" />
-            Download v1.1.1
+            Download v2.0.0
           </Link>
           <p className="mt-6 text-sm text-neutral-600">
-            Windows 10/11 • 64-bit • Installer (~200MB)
+            Windows 10/11 • 64-bit • Installer (~121MB)
           </p>
         </div>
       </section>

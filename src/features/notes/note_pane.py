@@ -1,7 +1,7 @@
 import logging
 import re
 import os
-from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent
+from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent, QMimeData
 from PyQt6.QtGui import (QFont, QTextListFormat, QTextCursor, QTextBlockFormat, 
                          QPainter, QColor, QFontMetrics, QTextCharFormat, QImage, QDesktopServices, QTextDocument,
                          QTextTableFormat, QTextFrameFormat, QTextLength, QPalette, QAction)
@@ -10,16 +10,18 @@ from PyQt6.QtWidgets import QTextEdit, QWidget, QApplication, QFileDialog, QInpu
 # Component Imports
 from src.features.notes.image_manager import NoteImageManager
 from src.features.notes.paging_engine import NotePagingEngine
+from src.features.notes.note_completer import NoteCompleter
 
 class NotePane(QTextEdit):
     """The core rich-text editor component (formerly NoteEditor, reverted to NotePane)."""
     focus_received = pyqtSignal(object)   # Notify main window of focus
     content_changed = pyqtSignal()
     cursor_format_changed = pyqtSignal(object)  # Emits QTextCharFormat on cursor move
+    internal_link_clicked = pyqtSignal(str)     # Emits obj_name
 
     def __init__(self, parent=None, zoom=100):
         super().__init__(parent)
-        self.setPlaceholderText("Type notes here... (Paste images supported)")
+        self.setPlaceholderText("Type notes here... (Paste images supported - Use @ to link notes)")
         self.setMinimumHeight(100) # Prevent massive layout expansion during dock creation
         self.setMouseTracking(True) 
         self.viewport().setMouseTracking(True)
@@ -31,6 +33,10 @@ class NotePane(QTextEdit):
         # Managers (Plan v12.3: Reduced page size to 250KB for better performance)
         self.paging_engine = NotePagingEngine(self, page_size=250000)
         self.image_manager = NoteImageManager(self)
+        
+        # Plan v12.6: Note Completer for @mentions
+        self.completer = NoteCompleter(self)
+        self.completer.note_selected.connect(self._insert_note_link)
         
         self.textChanged.connect(self._on_content_modified)
         self.verticalScrollBar().valueChanged.connect(self.paging_engine.check_scroll)
@@ -52,6 +58,12 @@ class NotePane(QTextEdit):
         
         # ALWAYS initialize theme and font on startup
         QTimer.singleShot(0, self._sync_initial_theme)
+        
+        # Initialize default font to ensure native zoom works (forces pointSize instead of pixelSize)
+        doc_font = self.document().defaultFont()
+        if doc_font.pointSize() <= 0:
+             doc_font.setPointSize(11)
+        self.document().setDefaultFont(doc_font)
         
         # Emit format info when cursor moves — used to sync toolbar widgets
         self.cursorPositionChanged.connect(self._emit_cursor_format)
@@ -77,8 +89,6 @@ class NotePane(QTextEdit):
             text_color = QColor(palette.get('text', '#000000'))
             is_dark = palette.get('is_dark', True)
             self.apply_theme_colors(text_color, is_dark)
-        
-        self._apply_zoom()
 
     # ── Text Color / Highlight Color / Font Size ──────────────────────
     def set_font_size(self, size: int):
@@ -131,6 +141,10 @@ class NotePane(QTextEdit):
         # 3. Store for future resets
         self._theme_text_color = text_color
         self._is_dark_mode = is_dark
+        
+        # Plan v12.6: Sync completer theme
+        if hasattr(self, 'completer'):
+            self.completer.apply_theme(is_dark)
 
     def focusInEvent(self, event):
         """Tell MainWindow that this pane is now active."""
@@ -155,85 +169,40 @@ class NotePane(QTextEdit):
         """Increase zoom by 10%, max 300%."""
         if self._zoom_factor < 300:
             self._zoom_factor += 10
-            self._apply_zoom()
+            super().zoomIn(1)
+            self._show_zoom_status()
             logging.info(f"NotePane: Zoom In triggered. Current level: {self._zoom_factor}%")
 
     def zoom_out(self):
         """Decrease zoom by 10%, min 50%."""
         if self._zoom_factor > 50:
             self._zoom_factor -= 10
-            self._apply_zoom()
+            super().zoomOut(1)
+            self._show_zoom_status()
             logging.info(f"NotePane: Zoom Out triggered. Current level: {self._zoom_factor}%")
 
     def zoom_reset(self):
         """Reset zoom to 100%."""
+        diff = self._zoom_factor - 100
+        steps = abs(diff) // 10
+        if diff > 0:
+            super().zoomOut(steps)
+        elif diff < 0:
+            super().zoomIn(steps)
         self._zoom_factor = 100
-        self._apply_zoom()
+        self._show_zoom_status()
 
     def get_zoom(self):
         return self._zoom_factor
 
     def set_zoom(self, val):
+        diff = val - self._zoom_factor
+        steps = abs(diff) // 10
+        if diff > 0:
+            super().zoomIn(steps)
+        elif diff < 0:
+            super().zoomOut(steps)
         self._zoom_factor = val
-        self._apply_zoom(force_full_refresh=True)
-
-    def _apply_zoom(self, force_full_refresh=False):
-        """
-        Calculates and applies font size. 
-        Plan v12.3: Made refresh optional and added byte-size safety guard.
-        """
-        # Ensure _base_font_size is sane
-        base_size = self._base_font_size if self._base_font_size > 0 else 13.0
-        new_size = max(1.0, base_size * (self._zoom_factor / 100.0))
-        
-        if new_size <= 0:
-            logging.error(f"NotePane: INVALID font size calculated: {new_size} (zoom={self._zoom_factor}, base={base_size})")
-            new_size = 13.0
-        
-        # 1. Update the document's default font (low cost, handles new text)
-        doc = self.document()
-        doc_font = doc.defaultFont()
-        doc_font.setPointSizeF(new_size)
-        doc.setDefaultFont(doc_font)
-        
-        # 2. Update widget font
-        font = self.font()
-        font.setPointSizeF(new_size)
-        self.setFont(font)
-
-        if not force_full_refresh:
-            return
-
-        # 3. SAFETY GUARD: If document is massive (> 500k characters), do NOT do full refresh
-        # Plan v12.3: Use O(1) characterCount() instead of O(N) toHtml() which crashes.
-        if doc.characterCount() > 500000:
-            logging.warning("NotePane: Document too large for full zoom refresh. Skipping deep format.")
-            return
-
-        # 4. Full Document Refresh (High cost)
-        self.blockSignals(True)
-        try:
-            curr_cursor = self.textCursor()
-            pos = curr_cursor.position()
-            anchor = curr_cursor.anchor()
-
-            cursor = QTextCursor(doc)
-            cursor.beginEditBlock()
-            cursor.select(QTextCursor.SelectionType.Document)
-            
-            fmt = QTextCharFormat()
-            fmt.setFontPointSize(new_size)
-            cursor.mergeCharFormat(fmt)
-            cursor.endEditBlock()
-            
-            # Restore cursor
-            curr_cursor.setPosition(anchor)
-            curr_cursor.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
-            self.setTextCursor(curr_cursor)
-        finally:
-            self.blockSignals(False)
-            
-        self._show_zoom_status()
 
     def _show_zoom_status(self):
         """Show zoom level in status bar if available."""
@@ -298,7 +267,96 @@ class NotePane(QTextEdit):
                 # Intercept the space so it doesn't get inserted AFTER the bullet
                 return
             
+                return
+            
+        # 4. Plan v12.6: @Mention Trigger & Navigation
+        if self.completer.isVisible():
+            if self.completer.handle_navigation(event):
+                return
+            if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+                # If they delete the @, hide it
+                # We check the char before cursor
+                cursor = self.textCursor()
+                if cursor.block().text().endswith("@"):
+                    self.completer.hide()
+            elif not event.text().isalnum() and event.key() not in (Qt.Key.Key_Space,):
+                 # Hide on symbols/punctuation (except space for filtering)
+                 self.completer.hide()
+        
+        if event.key() == Qt.Key.Key_At:
+            # Show the completer
+            main_win = self.window()
+            notes = []
+            if hasattr(main_win, 'note_service'):
+                all_notes = main_win.note_service.get_notes()
+                # Security Fix: Do not expose notes from locked folders
+                notes = [n for n in all_notes if not main_win.note_service.is_folder_locked(n.get("folder", "General"))]
+            
+            # Position it right above/below current cursor
+            rect = self.cursorRect()
+            global_pos = self.viewport().mapToGlobal(rect.bottomLeft())
+            self.completer.show_completions(global_pos, notes)
+            # Pass the @ key to the editor normally so it typed
+            
         super().keyPressEvent(event)
+
+    def createMimeDataFromSelection(self) -> QMimeData:
+        """
+        Custom MIME data builder for copy operations.
+        Converts internal 'img_N.png' resources back to base64 so external apps (Zalo, etc.)
+        can understand the copied HTML fragment.
+        """
+        # Get standard MIME data from base class
+        mime = super().createMimeDataFromSelection()
+        
+        if mime.hasHtml():
+            # Process HTML to convert internal IDs to base64
+            portable_html = self.image_manager.get_html_with_base64(mime.html())
+            mime.setHtml(portable_html)
+            
+        return mime
+        
+        # Post-typing filter update
+        if self.completer.isVisible():
+             # Extract text after the @ in the current block
+             cursor = self.textCursor()
+             block_text = cursor.block().text()
+             at_idx = block_text.rfind("@")
+             if at_idx != -1:
+                 filter_text = block_text[at_idx+1:].strip()
+                 # Refilter
+                 main_win = self.window()
+                 notes = main_win.note_service.get_notes() if hasattr(main_win, 'note_service') else []
+                 # Re-show with updated filter at same pos
+                 rect = self.cursorRect()
+                 global_pos = self.viewport().mapToGlobal(rect.bottomLeft())
+                 self.completer.show_completions(global_pos, notes, filter_text)
+
+    def _insert_note_link(self, note):
+        """Inserts a formatted vnnote:// link for the selected note."""
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        
+        # 1. Remove the @ and any typed filter text
+        block_text = cursor.block().text()
+        at_idx = block_text.rfind("@")
+        if at_idx != -1:
+             # Move to the @ and select everything until current pos
+             pos_in_block = cursor.positionInBlock()
+             cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor, pos_in_block - at_idx)
+             cursor.removeSelectedText()
+        
+        # 2. Insert the styled link
+        obj_name = note.get("obj_name")
+        title = note.get("title", "Untitled")
+        
+        # We use a custom color and weight to make it look like a Tag / Reference
+        # vnnote:// protocol is used for internal routing
+        link_html = f'<a href="vnnote://{obj_name}" style="color: #3498db; text-decoration: none; font-weight: bold;">@{title}</a>&nbsp;'
+        cursor.insertHtml(link_html)
+        
+        cursor.endEditBlock()
+        self.setFocus()
 
     def get_save_content(self):
         """
@@ -337,8 +395,6 @@ class NotePane(QTextEdit):
             cursor = self.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.insertHtml(html)
-            # Apply the current zoom level to the document default ensuring the chunk matches
-            self._apply_zoom(force_full_refresh=False) 
         finally:
             self.blockSignals(False)
             self.verticalScrollBar().blockSignals(False)
@@ -361,7 +417,6 @@ class NotePane(QTextEdit):
 
         processed = self.image_manager.process_html_for_insertion(html)
         self.paging_engine.set_content(processed)
-        self._apply_zoom(force_full_refresh=False) # Plan v12.3: Avoid expensive refresh on load
         self._is_dirty = False
         
     def highlight_search_result(self, query, line_number=0):
@@ -418,7 +473,6 @@ class NotePane(QTextEdit):
         
         self.blockSignals(True)
         self.setHtml(raw_content)
-        self._apply_zoom(force_full_refresh=False)
         self.blockSignals(False)
         self._is_dirty = False
         
@@ -645,6 +699,13 @@ class NotePane(QTextEdit):
                 url_data = self._get_url_at_pos(event.pos())
                 if url_data:
                     url = url_data[0] # Just the string
+                    
+                    # Plan v12.6: Internal link handling (vnnote://)
+                    if url.startswith("vnnote://"):
+                        obj_name = url.replace("vnnote://", "")
+                        self.internal_link_clicked.emit(obj_name)
+                        return
+                        
                     main_window = self.window()
                     dock_manager = getattr(main_window, 'dock_manager', None)
                     if dock_manager:
