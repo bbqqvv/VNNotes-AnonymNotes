@@ -16,8 +16,6 @@ def make_installer():
         "PyQt6/Qt6/resources/qtwebengine_resources_100p.debug.pak",
         "PyQt6/Qt6/resources/qtwebengine_resources_200p.debug.pak",
         "PyQt6/Qt6/resources/v8_context_snapshot.debug.bin",
-        "PyQt6/Qt6/resources/qtwebengine_resources_200p.pak",
-        "PyQt6/Qt6/resources/qtwebengine_devtools_resources.pak", 
         "debug.log",
     ]
 

@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
         
         # Core state
         self._is_restoring = False
+        self._is_internal_refresh = False  # Plan v12.5: Guard against recursive UI signals
         
         # RESTORED INITIALIZATION CALL
         self.late_init()
@@ -641,7 +642,11 @@ class MainWindow(QMainWindow):
 
         # Realtime Update for Sidebar (Skip during restoration)
         if not self._is_restoring and self.sidebar:
-            self.sidebar.refresh_tree()
+            self._is_internal_refresh = True
+            try:
+                self.sidebar.refresh_tree()
+            finally:
+                self._is_internal_refresh = False
             
         return dock
 
@@ -883,6 +888,10 @@ class MainWindow(QMainWindow):
 
     def on_sidebar_note_selected(self, note_obj_name):
         """Opens or focuses a note selected from the sidebar. (Plan v9.18: Instant suppression)"""
+        # Plan v12.5: RECURSION GUARD
+        if self._is_internal_refresh:
+            return
+
         # ─── PRE-EMPTIVE SUPPRESSION ───
         # We hide the branding IMMEDIATELY, before any IO or widget creation
         if hasattr(self, 'branding') and self.branding:

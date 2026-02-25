@@ -103,11 +103,10 @@ class DatabaseManager:
 
             # 5. Global Search Virtual Table (FTS5)
             # content='v_notes_content' allows FTS to mirror the View for snippet() perfectly
-            # Rebuild it if it was using the old notes_content definition.
-            cursor.execute("DROP TABLE IF EXISTS notes_fts;")
+            # Plan v12.5: REMOVED DROP TABLE. We only create if not exists to avoid 12MB index rebuild on every boot.
             
             cursor.execute("""
-            CREATE VIRTUAL TABLE notes_fts USING fts5(
+            CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
                 title, 
                 content,
                 content='v_notes_content', 
