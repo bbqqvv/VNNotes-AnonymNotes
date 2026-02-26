@@ -71,3 +71,4 @@ trace_*.py
 branding_test_output.png
 temp_indent.txt
 appnote.png
+web/
