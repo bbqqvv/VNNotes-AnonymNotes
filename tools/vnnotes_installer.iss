@@ -2,7 +2,7 @@
 ; Note: This file is meant to be compiled by ISCC.exe
 
 #define MyAppName "VNNotes"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "VTech Digital Solution"
 #define MyAppURL "https://github.com/bbqqvv/VNNotes"
 #define MyAppExeName "VNNotes.exe"
