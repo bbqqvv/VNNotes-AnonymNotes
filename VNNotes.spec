@@ -34,6 +34,14 @@ exe = EXE(
     entitlements_file=None,
     icon=['D:\\Workspace\\Tool\\TH\\VNNotes\\appnote.ico'],
 )
+# --- OPTIMIZATION FILTERS ---
+# Strip massive unused Chromium debug symbols
+a.datas = [x for x in a.datas if not x[0].endswith('qtwebengine_devtools_resources.debug.pak')]
+a.datas = [x for x in a.datas if not x[0].endswith('qtwebengine_devtools_resources.pak')]
+# Strip unused software-render fallback
+a.binaries = [x for x in a.binaries if not x[0].endswith('opengl32sw.dll')]
+# --------------------------
+
 coll = COLLECT(
     exe,
     a.binaries,
