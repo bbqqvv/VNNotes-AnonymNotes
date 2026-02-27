@@ -1,5 +1,5 @@
-import logging
-from src.core.storage import StorageManager
+﻿import logging
+from src.infrastructure.storage import StorageManager
 
 class BrowserService:
     """

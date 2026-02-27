@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QGraphicsOpacityEffect, QGridLayout
+﻿from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QGraphicsOpacityEffect, QGridLayout
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, pyqtProperty, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QFontMetrics
 import os
@@ -12,7 +12,7 @@ class BrandingOverlay(QWidget):
         # Load Logo Assets
         self.logo_pixmap = self._load_logo()
 
-        # ─── Simple Stacked Centering (Absolute Stability) ───
+        # â”€â”€â”€ Simple Stacked Centering (Absolute Stability) â”€â”€â”€
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
@@ -130,9 +130,8 @@ class BrandingOverlay(QWidget):
             self.content_container.adjustSize()
             self.content_container.updateGeometry()
             
-            if self.layout():
-                self.layout().invalidate()
-                self.layout().activate()
+            # 3. Force the layout refresh (Plan v8.18: Removed for Python 3.14 stability)
+            pass
                 
             self.update()
         except Exception:

@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 import base64
 import os
@@ -47,7 +47,7 @@ class NoteImageManager:
                     # If the image format has no explicit size (never been resized),
                     # fall back to the native image dimensions from the document resource.
                     # Without this, image_rect = QRect(x, y, 0, 0) which never
-                    # contains any click point → context menu never shows image options.
+                    # contains any click point â†’ context menu never shows image options.
                     if w <= 0 or h <= 0:
                         native_img = self.doc.resource(3, QUrl(fmt.name()))
                         if native_img and not native_img.isNull():

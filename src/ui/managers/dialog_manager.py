@@ -1,10 +1,10 @@
-import os
+﻿import os
 import logging
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QDockWidget
 from PyQt6 import sip
 
-from src.core.reader import UniversalReader
+from src.infrastructure.reader import UniversalReader
 from src.core.version import check_for_updates, CURRENT_VERSION
 
 logger = logging.getLogger(__name__)

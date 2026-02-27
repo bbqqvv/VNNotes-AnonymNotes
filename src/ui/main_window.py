@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import sys
 import threading
@@ -14,12 +14,14 @@ from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor, QC
 from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray, QPoint, QEvent
 from PyQt6 import QtCore, sip
 
+logger = logging.getLogger(__name__)
+
 
 
 
 # Consolidating color icon updates into MenuToolbarManager
 def _update_color_btn(btn, color: QColor, main_window=None, btn_type="text"):
-    """Draw a colored underline bar as the button icon — theme aware."""
+    """Draw a colored underline bar as the button icon â€” theme aware."""
     try:
         mtm = getattr(main_window, 'menu_toolbar_manager', None)
         if mtm:
@@ -39,7 +41,7 @@ from src.ui.managers.tab_manager import TabManager
 from src.ui.managers.dialog_manager import DialogManager
 from src.ui.managers.status_bar_manager import StatusBarManager
 from src.core.context import ServiceContext
-from src.core.session_manager import SessionManager
+from src.infrastructure.session_manager import SessionManager
 from src.ui.sidebar import SidebarWidget
 from src.ui.managers.theme_manager import ThemeManager
 from src.ui.quick_switcher import QuickSwitcher
@@ -102,6 +104,10 @@ class MainWindow(QMainWindow):
     @active_pane.setter
     def active_pane(self, value):
         self._active_pane = value
+        # DIAMOND-STANDARD: Immediately sync the status bar when the active pane changes.
+        # This fixes the issue where the user has to click before the Markdown button appears.
+        if hasattr(self, 'status_bar_manager') and self.status_bar_manager:
+            self.status_bar_manager.update_info()
         
     def late_init(self):
         # Feature Managers (extracted for maintainability)
@@ -117,8 +123,8 @@ class MainWindow(QMainWindow):
         # Setup UI
         self.setup_window()
         self.setup_ui()
-        self.setup_stealth()
-        self.setup_tray()
+        # self.setup_stealth()
+        # self.setup_tray()
         
         # Final Setup
         self.setup_status_bar_widgets()
@@ -127,7 +133,13 @@ class MainWindow(QMainWindow):
         self.tab_hook_timer = QTimer(self)
         self.tab_hook_timer.setSingleShot(True)
         self.tab_hook_timer.timeout.connect(self.hook_tab_bars)
-        self.tab_hook_timer.start(1500)  # Initial hook after setup
+        self.tab_hook_timer.start(800)  # Reduced from 5000ms for faster UI response
+        
+        # Plan v15.5: Global Shortcut Interceptor (ShortcutOverride)
+        # This is CRITICAL to prevent Ctrl+Tab from being swallowed by child widgets or OS.
+        qApp = QApplication.instance()
+        if qApp:
+            qApp.installEventFilter(self)
         
         # Signal Debouncing (Phase 3: Realtime UI Sync)
         # 1. UI-Only Sync (Title/Sidebar): High frequency (100ms) for "Realtime" feel
@@ -148,14 +160,16 @@ class MainWindow(QMainWindow):
         self.shortcut_opacity_dec = QShortcut(QKeySequence("Ctrl+Alt+Left"), self)
         self.shortcut_opacity_dec.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut_opacity_dec.activated.connect(lambda: self.adjust_window_opacity(-10))
+
+        self.shortcut_prev_tab = None # Cleaned up in Plan v15.6
         
-        # 3. Branding Guard: Debounce visibility checks to prevent layout recursion "BÙM"
+        # 3. Branding Guard: Debounce visibility checks to prevent layout recursion "BÃ™M"
         self._branding_timer = QTimer(self)
         self._branding_timer.setSingleShot(True)
         self._branding_timer.timeout.connect(self._do_update_branding_visibility)
         
         # Status bar updates are now signal-driven (connected in set_active_pane)
-        # No polling timer needed — cursorPositionChanged fires on every keystroke/click
+        # No polling timer needed â€” cursorPositionChanged fires on every keystroke/click
 
         
         # Restore State (Synchronous Atomic Flow - Senior Standard)
@@ -174,7 +188,7 @@ class MainWindow(QMainWindow):
 
         # Senior Fix: Delayed stability check for Sidebar width
         # This fixes the "Startup Glitch" where the sidebar restores to a near-0 width.
-        QTimer.singleShot(1500, self._check_sidebar_stability)
+        # QTimer.singleShot(1500, self._check_sidebar_stability)
 
     def _check_sidebar_stability(self):
         """Diamond-Standard: Ensures sidebar is at a usable width after startup settlement."""
@@ -231,7 +245,7 @@ class MainWindow(QMainWindow):
                            QMainWindow.DockOption.GroupedDragging |
                            QMainWindow.DockOption.AllowNestedDocks)
         
-        # Top Tabs (IDE Standard) — apply to L/R areas only to prevent mask crashes
+        # Top Tabs (IDE Standard) â€” apply to L/R areas only to prevent mask crashes
         for area in [Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea]:
             self.setTabPosition(area, QTabWidget.TabPosition.North)
         
@@ -261,6 +275,7 @@ class MainWindow(QMainWindow):
         self.central_stack.setCurrentIndex(0)
         
         # 2. Sidebar Setup
+        from src.ui.sidebar import SidebarWidget
         self.sidebar = SidebarWidget(self.note_service, self)
         self.sidebar_dock = QDockWidget("Note Explorer", self)
         self.sidebar_dock.setObjectName("SidebarDock")
@@ -294,16 +309,16 @@ class MainWindow(QMainWindow):
         self.sidebar.search_result_picked.connect(self.on_search_result_picked)
         
         # 4. Global Shortcuts
-        search_act = QAction("Global Search", self)
-        search_act.setShortcut("Ctrl+Shift+F")
-        search_act.triggered.connect(self.focus_sidebar_search)
-        self.addAction(search_act)
+        # search_act = QAction("Global Search", self)
+        # search_act.setShortcut("Ctrl+Shift+F")
+        # search_act.triggered.connect(self.focus_sidebar_search)
+        # self.addAction(search_act)
         
         # 5. Apply Theme
         self.theme_manager.apply_theme()
         
-        QTimer.singleShot(100, self._setup_screen_listener)
-        QTimer.singleShot(150, self._stabilize_layout)
+        # QTimer.singleShot(100, self._setup_screen_listener)
+        QTimer.singleShot(5000, self._stabilize_layout)
 
 
     def _on_screen_changed(self, screen):
@@ -334,26 +349,27 @@ class MainWindow(QMainWindow):
 
     def _stabilize_layout(self):
         """Forces a full layout refresh and synchronizes geometry."""
-        # 0. Flush OS event queue
-        QApplication.processEvents()
-        
-        # 1. Force the layout to discard cached constraints and re-activate
-        mw_layout = self.layout()
-        if mw_layout and hasattr(mw_layout, 'invalidate'):
-            mw_layout.invalidate()
-        if mw_layout and hasattr(mw_layout, 'activate'):
-            mw_layout.activate()
+        try:
+            # 0. Flush OS event queue - REMOVED: causes abort in re-entrant layout calls
+            pass
+            # QApplication.processEvents()
             
-        # 2. Refresh sidebar geometry
-        if self.sidebar and hasattr(self.sidebar, 'tree') and self.sidebar.tree:
-            self.sidebar.tree.updateGeometry()
-            
-        # 3. Refresh Branding
-        if self.branding:
-            self.update_branding_visibility()
-            if hasattr(self.branding, '_update_elements'):
-                getattr(self.branding, '_update_elements')()
-            self.branding.update()
+            # 1. Force the layout to discard cached constraints and re-activate
+            # SENIOR SAFETY: Removed invalidate/activate as they cause native abort on Python 3.14
+            pass
+                
+            # 2. Refresh sidebar geometry
+            if hasattr(self, 'sidebar') and self.sidebar and hasattr(self.sidebar, 'tree') and self.sidebar.tree:
+                self.sidebar.tree.updateGeometry()
+                
+            # 3. Refresh Branding
+            if hasattr(self, 'branding') and self.branding:
+                self.update_branding_visibility()
+                if hasattr(self.branding, '_update_elements'):
+                    getattr(self.branding, '_update_elements')()
+                self.branding.update()
+        except Exception as e:
+            logging.error(f"CRASH IN STABILIZE LAYOUT: {e}", exc_info=True)
 
     def _on_screen_changed(self, screen):
         """Triggered when window moves to a different monitor."""
@@ -688,7 +704,7 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("Copied to clipboard (Open a note to paste)", 2000)
 
-    def set_active_pane(self, pane):
+    def set_active_pane(self, pane, dock=None, force_sync=False):
         # If switching to a different pane, close find bar for the old one
         if self.active_pane != pane:
             self.find_manager.close()
@@ -710,13 +726,17 @@ class MainWindow(QMainWindow):
             self._active_dock = None
             return
             
-        # Cache the parent dock to avoid findChildren loops
-        for dock in self.findChildren(QDockWidget):
-            try:
-                if not sip.isdeleted(dock) and dock.widget() == pane:
-                    self._active_dock = dock
-                    break
-            except RuntimeError: continue
+        # [ULTIMATE SYNC OPTIMIZATION] Use provided dock if available, otherwise fallback to search
+        if dock and not sip.isdeleted(dock):
+            self._active_dock = dock
+        else:
+            # Cache the parent dock to avoid findChildren loops
+            for d in self.findChildren(QDockWidget):
+                try:
+                    if not sip.isdeleted(d) and d.widget() == pane:
+                        self._active_dock = d
+                        break
+                except RuntimeError: continue
         
         # Connect signals: cursor format (toolbar sync) + cursor position (status bar)
         if hasattr(pane, 'cursor_format_changed'):
@@ -729,13 +749,16 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
             
-        # Plan v12.6: Sidebar Sync Highlight (Active Tab tracking)
-        # We use the cached _active_dock to get the obj_name
+        # Plan v15.8: Sidebar Sync Highlight (Active Tab tracking)
+        # Increased delay to 150ms for bulletproof focus stability.
+        # Plan v16.1: Force sync if requested (e.g. on explicit tab click)
         if self._active_dock and hasattr(self, 'sidebar'):
             obj_name = self._active_dock.objectName()
-            # Only sync if it's a NoteDock to avoid browser/clipboard confusion here
             if obj_name.startswith("NoteDock_"):
-                self.sidebar.select_note(obj_name)
+                try:
+                    logger.debug(f"[SYNC-TRACE] MainWindow: Queueing sidebar sync for dock.objectName()='{obj_name}' (150ms), forced={force_sync}")
+                    QTimer.singleShot(150, lambda: self.sidebar.select_note(obj_name))
+                except Exception: pass
 
     def _on_cursor_format_changed(self, char_fmt):
         """Update toolbar font size combo and color swatches when cursor moves."""
@@ -772,6 +795,11 @@ class MainWindow(QMainWindow):
     def apply_font_size(self, size: int):
         if self.active_pane:
             self.active_pane.set_font_size(size)
+
+    def convert_markdown(self):
+        """Triggers MD-to-RichText conversion on the active pane."""
+        if self.active_pane and hasattr(self.active_pane, "convert_markdown_to_rich_text"):
+            self.active_pane.convert_markdown_to_rich_text()
 
     def pick_text_color(self):
         from PyQt6.QtWidgets import QColorDialog
@@ -882,8 +910,8 @@ class MainWindow(QMainWindow):
              first_line = first_block.text().strip()[:30] if first_block.isValid() else ""
              
              if not first_line:
-                 # If document is empty, ALWAYS preserve its current explicit title
-                 first_line = dock.windowTitle() or "Untitled"
+                 # Plan v13.7: Prefer intentional title (clean) over windowTitle (disambiguated)
+                 first_line = dock.property("vnn_intentional_title") or dock.windowTitle() or "Untitled"
              
              if dock.windowTitle() != first_line:
                  dock.setWindowTitle(first_line)
@@ -909,7 +937,7 @@ class MainWindow(QMainWindow):
         if self._is_internal_refresh:
             return
 
-        # ─── PRE-EMPTIVE SUPPRESSION ───
+        # â”€â”€â”€ PRE-EMPTIVE SUPPRESSION â”€â”€â”€
         # We hide the branding IMMEDIATELY, before any IO or widget creation
         if hasattr(self, 'branding') and self.branding:
             self.branding.is_suppressed = True
@@ -945,7 +973,7 @@ class MainWindow(QMainWindow):
         try:
             note_data = self.note_service.get_note_by_id(note_obj_name)
             if note_data:
-                # ─── LOCKED NOTE HANDLER ───
+                # â”€â”€â”€ LOCKED NOTE HANDLER â”€â”€â”€
                 if note_data.get("is_locked"):
                     self.setUpdatesEnabled(True) # Unfreeze to show dialog
                     pwd, ok = PasswordDialog.get_input(
@@ -1044,8 +1072,8 @@ class MainWindow(QMainWindow):
 
     # --- Delegated to FindManager ---
     def show_find_dialog(self):
-        # ★ CRITICAL: Capture selection HERE, before focus shifts away from the note pane.
-        # This is the very first thing called when Ctrl+F is pressed — the pane still
+        # â˜… CRITICAL: Capture selection HERE, before focus shifts away from the note pane.
+        # This is the very first thing called when Ctrl+F is pressed â€” the pane still
         # has its text cursor with the user's selection intact at this exact moment.
         pane = self.active_pane
         if pane and hasattr(pane, '_last_selection') and hasattr(pane, 'textCursor'):
@@ -1062,12 +1090,17 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self.find_manager.reposition()
         
-    # nativeEvent handler removed — window is not frameless, so WM_NCHITTEST was dead code
+    # nativeEvent handler removed â€” window is not frameless, so WM_NCHITTEST was dead code
 
     def eventFilter(self, obj, event):
-        if self.find_manager.handle_key_event(obj, event):
+        """Global Application Event Filter."""
+        try:
+            if self.find_manager.handle_key_event(obj, event):
+                return True
+            return super().eventFilter(obj, event)
+        except KeyboardInterrupt:
+            # Swallow keyboard interrupt gracefully (e.g., when terminating from terminal)
             return True
-        return super().eventFilter(obj, event)
 
     # --- Quick Switcher ---
     def show_quick_switcher(self):
@@ -1084,9 +1117,21 @@ class MainWindow(QMainWindow):
         - If multiple areas exist or force_grid=True: Build 2x5 grid.
         - If only 1 area exists: Consolidate all notes into 1 tab stack (Respect user intent).
         """
-        logging.info(f"Restoring Grid Layout (v6.4 Area-Aware, force={force_grid})...")
+        logging.info(f"Restoring Grid Layout (v15.1 Area-Aware, force={force_grid})...")
         visible_notes = [d for d in self.dock_manager.get_note_docks() if d.isVisible()]
         if not visible_notes: return
+
+        # Grid Limit Safeguard (Plan v15.1)
+        # Check limit BEFORE any layout changes to avoid unwanted consolidation.
+        if len(visible_notes) > 8:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, 
+                "Grid Limit Reached", 
+                f"Grid layout is limited to 8 tabs for better legibility.\n"
+                f"You have {len(visible_notes)} tabs open. Please close some tabs before using Grid Reset."
+            )
+            return
         
         # Optimization: Disable updates
         self.setUpdatesEnabled(False)
@@ -1102,8 +1147,7 @@ class MainWindow(QMainWindow):
             # We GRID if force_grid is True OR if they were ALREADY split into multiple groups
             should_grid = force_grid
             if not should_grid:
-                 # Check if notes are in separate groups
-                 # If we find ANY two notes that aren't tabbed together, we trigger the grid
+                 # Check if notes are in separate groups (already split)
                  base_tab_group = set(self.tabifiedDockWidgets(visible_notes[0]))
                  base_tab_group.add(visible_notes[0])
                  for d in visible_notes:
@@ -1115,6 +1159,7 @@ class MainWindow(QMainWindow):
                 logging.info("Grid Reset: Single area detected, keeping as Tabs.")
             else:
                 logging.info("Grid Reset: Multiple areas or Split triggered, building Grid.")
+
                 # 3. Build the top row
                 first_row_count = (len(visible_notes) + 1) // 2
                 base = visible_notes[0]
@@ -1146,6 +1191,14 @@ class MainWindow(QMainWindow):
         finally:
             self.setUpdatesEnabled(True)
 
+
+    def toggle_dev_mode(self, checked):
+        """Broadcast Dev Mode visibility to all open NotePanes."""
+        self.config.set_value("editor/dev_mode", str(checked).lower())
+        for dock in self.dock_manager.get_note_docks():
+            pane = dock.widget()
+            if hasattr(pane, 'toggle_dev_mode'):
+                pane.toggle_dev_mode(checked)
 
     # --- Delegated to VisibilityManager ---
 
@@ -1216,8 +1269,6 @@ class MainWindow(QMainWindow):
         # Create convenience references for backward compatibility
         self.status_pos_label = self.status_bar_manager.status_pos_label
         self.status_char_label = self.status_bar_manager.status_char_label
-        self.status_zoom_label = self.status_bar_manager.status_zoom_label
-        self.status_eol_label = self.status_bar_manager.status_eol_label
         self.status_enc_label = self.status_bar_manager.status_enc_label
 
     def update_status_bar_info(self):

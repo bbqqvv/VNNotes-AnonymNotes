@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 from PyQt6.QtCore import QTimer
 

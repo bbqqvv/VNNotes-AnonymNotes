@@ -1,4 +1,4 @@
-import html as html_module
+﻿import html as html_module
 import logging
 import os
 import re
@@ -12,6 +12,8 @@ from PyQt6.QtGui import QIcon, QFont, QAction, QTextDocument, QAbstractTextDocum
 from PyQt6 import sip
 from src.utils.ui_utils import get_icon, get_icon_dir
 from src.ui.password_dialog import PasswordDialog
+
+logger = logging.getLogger(__name__)
 
 class HtmlItemDelegate(QStyledItemDelegate):
     """Renders tree items with HTML (for keyword highlighting in search results)."""
@@ -46,7 +48,7 @@ class HtmlItemDelegate(QStyledItemDelegate):
         # 4. Use a very wide text width to prevent wrapping (single-line render)
         doc.setTextWidth(max(text_rect.width(), 9999))
         
-        # 5. Draw HTML — clip strictly to text_rect to prevent bleeding
+        # 5. Draw HTML â€” clip strictly to text_rect to prevent bleeding
         painter.translate(text_rect.left(), text_rect.top())
         clip = QRectF(0, 0, text_rect.width(), text_rect.height())
         
@@ -96,7 +98,7 @@ class NoteTreeWidget(QTreeWidget):
             source_data = source_item.data(0, Qt.ItemDataRole.UserRole)
             target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
 
-            # Only allow: note → folder. Block note → note, or anything else.
+            # Only allow: note â†’ folder. Block note â†’ note, or anything else.
             if source_data and target_data:
                 if source_data.get("type") == "note" and target_data.get("type") == "folder":
                     new_folder = target_data["name"]
@@ -107,7 +109,7 @@ class NoteTreeWidget(QTreeWidget):
                     event.accept()
                     return
 
-            # Block all other drops (note→note, etc.)
+            # Block all other drops (noteâ†’note, etc.)
             event.ignore()
             return
 
@@ -176,10 +178,11 @@ class SidebarWidget(QWidget):
         
         self.setup_ui()
         self._note_item_map = {} # O(1) Mapping for Diamond-Standard performance
-        self.refresh_tree()
+        # Senior Fix: Delayed tree refresh to prevent startup flood
+        QTimer.singleShot(2000, self.refresh_tree)
         
     def sizeHint(self):
-        """Native Qt: The ultimate source of truth for 'Nguyên trạng' width."""
+        """Native Qt: The ultimate source of truth for 'NguyÃªn tráº¡ng' width."""
         if self._is_snapping:
             return QSize(0, 0)
         return QSize(int(self._last_stable_width), 600)
@@ -207,8 +210,8 @@ class SidebarWidget(QWidget):
         self.tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
         self.tree.setVerticalScrollMode(QTreeWidget.ScrollMode.ScrollPerPixel)
         
-        # HTML delegate for keyword highlighting in search results
-        self._html_delegate = HtmlItemDelegate(self.tree)
+        # HTML delegate for keyword highlighting in search results (Plan v8.18: Disabled for stability)
+        # self._html_delegate = HtmlItemDelegate(self.tree)
 
         # 2. Setup Layouts
         layout = QVBoxLayout(self)
@@ -321,7 +324,7 @@ class SidebarWidget(QWidget):
             if is_dragging:
                 if sd:
                     if current_width < 180:
-                        # 1. Visual Snap (The "Hít" Feel)
+                        # 1. Visual Snap (The "HÃ­t" Feel)
                         if not self._pending_collapse:
                             self._pending_collapse = True
                             sd.setMinimumWidth(0)
@@ -370,7 +373,6 @@ class SidebarWidget(QWidget):
         return get_icon_dir(self._get_is_dark())
 
     def update_toolbar_icons(self):
-        """Updates toolbar icons based on current theme using ui_utils."""
         self.toolbar.clear()
         is_dark = self._get_is_dark()
         
@@ -421,7 +423,7 @@ class SidebarWidget(QWidget):
                 # and tree.clear() was called). Remove stale reference.
                 self._note_item_map.pop(obj_name, None)
 
-        # Fallback: walk the tree (rare — only if map is stale)
+        # Fallback: walk the tree (rare â€” only if map is stale)
         it = QTreeWidgetItemIterator(self.tree)
         while it.value():
             i = it.value()
@@ -437,8 +439,7 @@ class SidebarWidget(QWidget):
 
 
     def refresh_tree(self):
-        """Rebuilds the tree structure from NoteService data."""
-        # If search is active, skip refresh — CSS applies automatically
+        # If search is active, skip refresh â€” CSS applies automatically
         if self.search_bar.isVisible() and self.search_bar.text().strip():
             return
         
@@ -488,6 +489,9 @@ class SidebarWidget(QWidget):
                     
                 item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name, "pinned": True})
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled | Qt.ItemFlag.ItemIsEditable)
+                # Tooltip: Contextual path for pinned notes
+                folder_name = note.get("folder", "General")
+                item.setToolTip(0, note.get('title', 'Note'))
                 self._note_item_map[obj_name] = item # Cache for O(1) sync
 
         notes = self.note_service.get_notes()
@@ -552,7 +556,9 @@ class SidebarWidget(QWidget):
                     note_item.setIcon(0, note_icon)
 
                 note_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "note", "obj_name": obj_name})
-                note_item.setToolTip(0, note.get("content", "")[:100])
+                # Tooltip: Descriptive context for standard folders
+                snippet = note.get("content", "")[:100].replace("\n", " ").strip()
+                note_item.setToolTip(0, f"Preview: {snippet}...")
                 self._note_item_map[obj_name] = note_item # Cache for O(1) sync
                 
                 # Enable Drag & EDITING
@@ -564,7 +570,7 @@ class SidebarWidget(QWidget):
                 note_font.setPointSize(9)
                 note_item.setFont(0, note_font)
 
-        # ── Browser docks section ──────────────────────────────────────
+        # â”€â”€ Browser docks section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self._add_browser_section()
         self.tree.blockSignals(False)
         
@@ -762,7 +768,7 @@ class SidebarWidget(QWidget):
                         # Highlight query keyword in snippet text
                         text = m['text']
                         # Add a visual cue to snippets
-                        indent_cue = "• " 
+                        indent_cue = "â€¢ " 
                         highlighted_text = self._highlight_keyword(f"{indent_cue}{text}", query)
                         snippet_item.setText(0, highlighted_text)
                         
@@ -798,8 +804,9 @@ class SidebarWidget(QWidget):
         if not obj_name:
             return
 
-        if self.search_bar.isVisible():
-            return
+        # Plan v16.2: Removed the search_bar visibility guard.
+        # This allows the sidebar to sync even if the search bar is open (e.g. empty search).
+        # Selection will still fail silently if the specific item is filtered out by search.
 
         # 1. Block signals to prevent recursive "note_selected" triggers
         self.tree.blockSignals(True)
@@ -811,25 +818,32 @@ class SidebarWidget(QWidget):
         # to find all instances (e.g. pinned + folder copy)
         from PyQt6.QtWidgets import QTreeWidgetItemIterator
         it = QTreeWidgetItemIterator(self.tree)
+        logger.debug(f"[SYNC-TRACE] Sidebar.select_note: Searching for '{obj_name}'")
         while it.value():
             item = it.value()
             data = item.data(0, Qt.ItemDataRole.UserRole)
             # PLAN V12.7 FIX: Data is a dict, extract 'obj_name'
-            if isinstance(data, dict) and data.get("obj_name") == obj_name:
-                item.setSelected(True)
-                # Expand parents
-                p = item.parent()
-                while p:
-                    p.setExpanded(True)
-                    p = p.parent()
-                
-                # Only scroll to the first one (usually folder copy, or pinned if top)
-                if not found_any:
-                    self.tree.setCurrentItem(item)
-                    self.tree.scrollToItem(item, QTreeWidget.ScrollHint.PositionAtCenter)
-                    found_any = True
+            if isinstance(data, dict):
+                item_obj_name = data.get("obj_name")
+                if item_obj_name == obj_name:
+                    logger.debug(f"[SYNC-TRACE] Sidebar.select_note: MATCH FOUND for '{obj_name}'")
+                    item.setSelected(True)
+                    # Expand parents
+                    p = item.parent()
+                    while p:
+                        p.setExpanded(True)
+                        p = p.parent()
+                    
+                    # Only scroll to the first one (usually folder copy, or pinned if top)
+                    if not found_any:
+                        self.tree.setCurrentItem(item)
+                        # Use PositionAtCenter to ensure the note is not "stuck" at the top/bottom boundary
+                        self.tree.scrollToItem(item, QTreeWidget.ScrollHint.PositionAtCenter)
+                        found_any = True
             it += 1
             
+        if not found_any:
+            logger.debug(f"[SYNC-TRACE] Sidebar.select_note: NO MATCH found for '{obj_name}' after full iteration.")
         self.tree.blockSignals(False)
 
     def _highlight_keyword(self, text, keyword):
@@ -923,6 +937,17 @@ class SidebarWidget(QWidget):
 
     def delete_all_notes_in_folder(self, folder_name):
         """Bulk deletes all notes in a folder."""
+        # Security Check: Folder Lock
+        is_locked = self.note_service.is_folder_locked(folder_name)
+        if is_locked:
+            is_dark = getattr(self.main_window.theme_manager, "is_dark_mode", True) if self.main_window else True
+            pwd, ok = PasswordDialog.get_input(self, f"Folder Locked: {folder_name}", 
+                                             "Enter folder password to delete all notes inside:", is_dark=is_dark)
+            if not ok: return
+            if not self.note_service.unlock_folder(folder_name, pwd):
+                QMessageBox.warning(self, "Access Denied", "Incorrect folder password.")
+                return
+
         confirm = QMessageBox.question(self, "Delete All Notes", 
                                        f"Are you sure you want to delete all notes in '{folder_name}'?\nThis cannot be undone.",
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -1022,6 +1047,19 @@ class SidebarWidget(QWidget):
         # Execute Deletions
         # 1. Notes
         for item, obj_name in notes:
+            # Security Check: Note Lock
+            note_meta = self.note_service.get_note_by_id(obj_name)
+            if note_meta and note_meta.get("is_locked"):
+                is_dark = getattr(self.main_window.theme_manager, "is_dark_mode", True) if self.main_window else True
+                pwd, ok = PasswordDialog.get_input(self, f"Note Locked: {note_meta.get('title')}", 
+                                                 "This note is locked. Enter password to delete:", is_dark=is_dark)
+                if not ok:
+                    continue # Skip this note
+                
+                if not self.note_service.unlock_note(obj_name, pwd):
+                    QMessageBox.warning(self, "Access Denied", f"Incorrect password for '{note_meta.get('title')}'. Skipping.")
+                    continue
+
             if self.note_service.delete_note(obj_name):
                 self.note_deleted.emit(obj_name)
                 # Visual remove
@@ -1129,7 +1167,12 @@ class SidebarWidget(QWidget):
             
             base_icon_path = self._get_base_icon_path()
             
-            if item_type == "folder":
+            if item_type == "pinned_folder":
+                unpin_all_act = QAction(QIcon(os.path.join(base_icon_path, "pin.svg")), "Unpin All Notes", self)
+                unpin_all_act.triggered.connect(self._unpin_all_notes)
+                menu.addAction(unpin_all_act)
+            
+            elif item_type == "folder":
                 folder_name = data.get("name")
                 is_folder_locked = self.note_service.is_folder_locked(folder_name)
                 
@@ -1208,6 +1251,19 @@ class SidebarWidget(QWidget):
                 delete_act.triggered.connect(self.delete_selected_items)
                 menu.addAction(delete_act)
 
+                menu.addSeparator()
+                
+                # Move to Folder Sub-menu
+                move_menu = menu.addMenu(QIcon(os.path.join(base_icon_path, "folder-open.svg")), "Move to Folder")
+                folders = self.note_service.get_folders()
+                current_folder = note.get("folder", "General") if note else "General"
+                
+                for f_name in folders:
+                    if f_name == current_folder: continue
+                    move_act = QAction(f_name, self)
+                    move_act.triggered.connect(lambda checked, fn=f_name: self.on_move_note_requested(obj_name, fn))
+                    move_menu.addAction(move_act)
+
             elif item_type == "browser":
                 icon_path = os.path.join(base_icon_path, "browser.svg")
                 open_act = QAction(QIcon(icon_path), "Open", self)
@@ -1234,6 +1290,19 @@ class SidebarWidget(QWidget):
             menu.addAction(new_folder_act)
             
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def _unpin_all_notes(self):
+        """Unpins all notes currently in the Pinned folder."""
+        pinned = self.note_service.get_pinned_notes()
+        if not pinned: return
+        
+        for note in pinned:
+            # Note objects can be dicts or dataclasses
+            obj_name = note.obj_name if hasattr(note, 'obj_name') else note.get("obj_name")
+            self.note_service.toggle_pin(obj_name)
+        
+        self.note_service.save_to_disk()
+        self.refresh_tree()
 
     def on_move_note_requested(self, note_obj_name, new_folder):
         if self.note_service.move_note(note_obj_name, new_folder):

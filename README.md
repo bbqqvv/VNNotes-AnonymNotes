@@ -1,6 +1,6 @@
-# 🍃 VNNotes: The Ultimate Partner for Meetings & Interviews
+﻿# ðŸƒ VNNotes: The Ultimate Partner for Meetings & Interviews
 
-![Version](https://img.shields.io/badge/version-2.0.1-emerald?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.0.1.1-emerald?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-gray?style=flat-square)
 
@@ -10,40 +10,40 @@
 
 ---
 
-## 🌟 Power Features (v2.0.1 Stable)
+## ðŸŒŸ Power Features (v2.0.1.1 Stable)
 
-### 1. 👻 Phantom Invisibility (Anti-Capture)
+### 1. ðŸ‘» Phantom Invisibility (Anti-Capture)
 Share your screen with confidence. Advanced Anti-Capture technology makes VNNotes non-existent to **Zoom, Teams, OBS, and Discord**. Present your secret notes or scripts in plain sight while others only see your wallpaper.
 
-### 2. 🎤 Meeting Master Teleprompter
+### 2. ðŸŽ¤ Meeting Master Teleprompter
 Maintain perfect eye contact with your camera. Float transparent prompts and scripts over any application. Deliver your points with absolute authority without ever looking away from your audience.
 
-### 3. 📑 Multi-Document Workspace
+### 3. ðŸ“‘ Multi-Document Workspace
 Manage multiple interview questions, research papers, and scripts simultaneously. Switch between unlimited tabs and documents instantly for a seamless professional flow.
 
-### 4. ⚡ Integrated Research Hub (Ultra-Hub)
+### 4. âš¡ Integrated Research Hub (Ultra-Hub)
 A modular command center that integrates a **Mini Browser** and **Smart Clipboard** with Auto-Paste. Look up real-time info and paste complex answers directly into your workflow without switching windows.
 
-### 5. 🪟 Advanced Split View Workspace
+### 5. ðŸªŸ Advanced Split View Workspace
 Instantly divide your screen into multiple panels. Use the intuitive **Split Right** and **Split Down** toolbar buttons (or `Ctrl + \` for quick side-by-side splitting) to view notes, scripts, and research materials simultaneously without juggling windows.
 
-### 6. 📌 Always on Top & Quick Switcher
+### 6. ðŸ“Œ Always on Top & Quick Switcher
 Never lose your notes behind other windows with the explicit "**Always on Top**" toggle. Need to jump between scripts? Hit `Ctrl + P` to instantly open the floating **Quick Switcher** and fuzzy-search through all your active notes.
 
-### 7. ✨ Smart Auto-Formatting
+### 7. âœ¨ Smart Auto-Formatting
 Type at the speed of thought. Start a line with `- ` and watch it instantly auto-format into a clean, professional bulleted list, keeping your meeting notes structured without ever reaching for the toolbar.
 
-### 8. 🔒 Standalone Private Vault
+### 8. ðŸ”’ Standalone Private Vault
 Zero cloud, zero tracking, zero logs. A military-grade local storage philosophy ensuring your high-stakes meeting notes and sensitive documents stay exclusively on your machine.
 
 ---
 
-## 🚀 Download & Installation
+## ðŸš€ Download & Installation
 
 ### Official Installer (Recommended)
-Download the official **v2.0.1 Stable** installer from the Releases page:
+Download the official **v2.0.1.1 Stable** installer from the Releases page:
 
-👉 **[Download VNNotes Setup](https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest)**
+ðŸ‘‰ **[Download VNNotes Setup](https://github.com/bbqqvv/VNNotes-AnonymNotes/releases/latest)**
 
 1.  Download `VNNotes_Setup.exe`.
 2.  Run the professional multi-page setup wizard.
@@ -51,7 +51,7 @@ Download the official **v2.0.1 Stable** installer from the Releases page:
 
 ---
 
-## 💻 For Developers
+## ðŸ’» For Developers
 
 Build your own secret workspace from source:
 
@@ -76,11 +76,11 @@ python tools/build_installer.py
 
 ---
 
-## 🌐 Project Links
+## ðŸŒ Project Links
 - **Official Website**: [VNNotes Landing Page](https://github.com/bbqqvv/VNNotes)
 - **Support & Issues**: [GitHub Issues](https://github.com/bbqqvv/VNNotes-AnonymNotes/issues)
 
-## ⌨️ Pro Shortcuts
+## âŒ¨ï¸ Pro Shortcuts
 
 | Shortcut | Function |
 | :--- | :--- |

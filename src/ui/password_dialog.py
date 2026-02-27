@@ -1,4 +1,4 @@
-import os
+﻿import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QDialogButtonBox)
 from PyQt6.QtGui import QIcon

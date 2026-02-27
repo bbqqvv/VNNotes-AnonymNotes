@@ -1,4 +1,4 @@
-"""
+﻿"""
 Centralized CSS Style Registry for VNNotes.
 Contains reusable CSS fragments and style templates to ensure theme consistency.
 """

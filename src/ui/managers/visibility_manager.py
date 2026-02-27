@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import threading
 import time
 
@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import QDockWidget, QApplication
 from PyQt6.QtCore import Qt, QTimer, QMetaObject, pyqtSlot
 from PyQt6 import sip
 
-from src.core.stealth import StealthManager
+from src.infrastructure.stealth import StealthManager
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class VisibilityManager:
 
     def setup_stealth(self):
         """Initialize the stealth system: event filter + global hotkeys."""
-        from src.core.stealth import StealthEventFilter
+        from src.infrastructure.stealth import StealthEventFilter
         self.mw.stealth_filter = StealthEventFilter(StealthManager, False)
         QApplication.instance().installEventFilter(self.mw.stealth_filter)
 

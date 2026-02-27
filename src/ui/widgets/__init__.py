@@ -1,1 +1,1 @@
-# Widget package
+﻿# Widget package

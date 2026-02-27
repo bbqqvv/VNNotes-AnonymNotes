@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QToolBar, QLineEdit, QMenu, QToolButton)
 from PyQt6.QtGui import QAction, QIcon
@@ -36,14 +36,14 @@ class StealthWebView(QWebEngineView):
         icon_dir = os.path.join(base_path, "assets", "icons", icon_folder)
         
         # 1. Ask AI Action (Perplexity)
-        ai_act = QAction(f"✨ Ask AI '{display_text}'", self)
+        ai_act = QAction(f"âœ¨ Ask AI '{display_text}'", self)
         ai_icon_path = os.path.join(icon_dir, "ai.svg")
         if os.path.exists(ai_icon_path):
              ai_act.setIcon(QIcon(ai_icon_path))
              
         if not selected_text:
              ai_act.setEnabled(False)
-             ai_act.setText("✨ Select text to Ask AI")
+             ai_act.setText("âœ¨ Select text to Ask AI")
         else:
              if dock_manager:
                 # Using Perplexity for "Search with AI" experience

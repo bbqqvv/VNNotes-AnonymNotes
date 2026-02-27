@@ -1,7 +1,7 @@
-from src.core.services.note_service import NoteService
-from src.core.services.browser_service import BrowserService
+﻿from src.domain.services.note_service import NoteService
+from src.domain.services.browser_service import BrowserService
 from src.core.config import ConfigManager
-from src.core.storage import StorageManager
+from src.infrastructure.storage import StorageManager
 
 class ServiceContext:
     """

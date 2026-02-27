@@ -1,16 +1,94 @@
-import logging
+﻿import logging
 import re
 import os
-from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent, QMimeData
+from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent, QMimeData, QPoint
 from PyQt6.QtGui import (QFont, QTextListFormat, QTextCursor, QTextBlockFormat, 
                          QPainter, QColor, QFontMetrics, QTextCharFormat, QImage, QDesktopServices, QTextDocument,
-                         QTextTableFormat, QTextFrameFormat, QTextLength, QPalette, QAction)
-from PyQt6.QtWidgets import QTextEdit, QWidget, QApplication, QFileDialog, QInputDialog
+                         QTextTableFormat, QTextFrameFormat, QTextLength, QPalette, QAction, QTextFormat)
+from PyQt6.QtWidgets import QTextEdit, QWidget, QApplication, QFileDialog, QInputDialog, QFrame
 
 # Component Imports
 from src.features.notes.image_manager import NoteImageManager
 from src.features.notes.paging_engine import NotePagingEngine
 from src.features.notes.note_completer import NoteCompleter
+
+class LineNumberArea(QWidget):
+    """Gutter widget for painting line numbers."""
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def sizeHint(self):
+        return QSize(self.editor.line_number_area_width(), 0)
+
+    def paintEvent(self, event):
+        self.editor.line_number_area_paint_event(event)
+
+class MinimapArea(QTextEdit):
+    """Mirrored, microscopic preview of the content."""
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.editor = editor
+        self.setReadOnly(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        self.document().setDocumentMargin(0)
+        self.setObjectName("EditorMinimap")
+        
+        # Microscopic font for VS Code effect
+        font = QFont("Consolas") if os.name == 'nt' else QFont("Monospace")
+        font.setPointSizeF(1.0) # Base tiny size
+        self.setFont(font)
+        
+        # 1. Subtle, professional indicator (Notepad++ Style)
+        # Represents the visible area; semi-transparent light-gray with a crisp border
+        self.indicator = QWidget(self.viewport())
+        self.indicator.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 0.05); 
+            border: 1px solid rgba(0, 0, 0, 0.2);
+        """)
+        self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.indicator.show()
+        
+        # 2. Minimap Styling: Seamless and subtle
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.setStyleSheet("""
+            QTextEdit {
+                background-color: transparent; 
+                border-left: 1px solid rgba(150, 150, 150, 0.2);
+            }
+        """)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        
+    def mousePressEvent(self, event):
+        self.handle_minimap_click(event)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.handle_minimap_click(event)
+        super().mouseMoveEvent(event)
+
+    def handle_minimap_click(self, event):
+        # 1. Find exactly which text block the user clicked on in the minimap
+        cursor = self.cursorForPosition(event.pos())
+        block_num = cursor.blockNumber()
+        
+        # 2. Find that same block in the main editor
+        main_block = self.editor.document().findBlockByNumber(block_num)
+        
+        if main_block.isValid():
+            # 3. Calculate its position in the main editor's document layout
+            block_rect = self.editor.document().documentLayout().blockBoundingRect(main_block)
+            
+            # 4. Scroll the main editor so this block is centered
+            v_bar = self.editor.verticalScrollBar()
+            half_view = self.editor.viewport().height() / 2
+            v_bar.setValue(int(block_rect.top() - half_view))
 
 class NotePane(QTextEdit):
     """The core rich-text editor component (formerly NoteEditor, reverted to NotePane)."""
@@ -29,6 +107,7 @@ class NotePane(QTextEdit):
         self.file_path = None # Tracking the physical file on disk
         self._current_url_highlight: "tuple[int, int] | None" = None 
         self._is_dirty = False # Track if user has modified the content
+        self._is_md_mode = True # Default to Markdown source view
         
         # Managers (Plan v12.3: Reduced page size to 250KB for better performance)
         self.paging_engine = NotePagingEngine(self, page_size=250000)
@@ -42,12 +121,25 @@ class NotePane(QTextEdit):
         self.verticalScrollBar().valueChanged.connect(self.paging_engine.check_scroll)
         self._search_highlight_timer = None
         
+        # Advanced Editor Features State
+        self.line_number_area = LineNumberArea(self)
+        self.minimap = MinimapArea(self)
+        
+        # Read from config (handled by MainWindow/DockManager later, but set defaults)
+        self._show_line_numbers = True
+        self._show_minimap = True
+        
+        # Connections for UI sync
+        self.document().blockCountChanged.connect(self.update_line_number_area_width)
+        self.verticalScrollBar().valueChanged.connect(self.update_sidebars)
+        self.textChanged.connect(self.sync_minimap_content)
+        
         # Search Cache (Instance based to avoid clashing)
         self._plain_text_cache = None
         self._last_full_html = None
         
         # Zoom state
-        self._zoom_factor = zoom  # percentage, 100 = default
+        self._zoom_factor = int(zoom) if zoom else 100  # percentage, 100 = default
         self._base_font_size = 13.0 # Default base size (100% zoom)
         
         # Sequential Search State
@@ -57,21 +149,240 @@ class NotePane(QTextEdit):
         self._last_selection = ""
         
         # ALWAYS initialize theme and font on startup
-        QTimer.singleShot(0, self._sync_initial_theme)
+        # QTimer.singleShot(0, self._sync_initial_theme)
         
         # Initialize default font to ensure native zoom works (forces pointSize instead of pixelSize)
         doc_font = self.document().defaultFont()
         if doc_font.pointSize() <= 0:
-             doc_font.setPointSize(11)
+             doc_font.setPointSize(12)
         self.document().setDefaultFont(doc_font)
         
-        # Emit format info when cursor moves — used to sync toolbar widgets
+        # Emit format info when cursor moves â€” used to sync toolbar widgets
         self.cursorPositionChanged.connect(self._emit_cursor_format)
+        self.cursorPositionChanged.connect(self.highlight_current_line)
 
 
     def _emit_cursor_format(self):
         """Broadcast current char format so toolbar can update font size / color swatches."""
         self.cursor_format_changed.emit(self.currentCharFormat())
+        self.update_sidebars()
+
+
+
+    def wheelEvent(self, event):
+        """Intercept scroll wheel to dynamically sync zoom across line numbers and minimap."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_sidebars_layout()
+
+    def update_sidebars_layout(self):
+        cr = self.contentsRect()
+        
+        # Reserved widths
+        ln_w = self.line_number_area_width() if self._show_line_numbers else 0
+        mm_w = self.minimap_width() if self._show_minimap else 0
+        
+        # 1. RESERVE SPACE in viewport
+        self.setViewportMargins(ln_w, 0, mm_w, 0)
+        
+        # 2. POSITION LINE NUMBERS (Left Gutter)
+        if self._show_line_numbers:
+            self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), ln_w, cr.height()))
+            self.line_number_area.show()
+        else:
+            self.line_number_area.hide()
+            
+        # 3. POSITION MINIMAP (Right Gutter)
+        if self._show_minimap:
+            self.minimap.setGeometry(QRect(cr.right() - mm_w + 1, cr.top(), mm_w, cr.height()))
+            self.minimap.show()
+            # Ensure indicator is correctly positioned on resize
+            self.sync_minimap_scroll()
+        else:
+            self.minimap.hide()
+
+    def line_number_area_paint_event(self, event):
+        painter = QPainter(self.line_number_area)
+        
+        # Background Gutter - Subtly darker than the editor
+        bg_color = self.palette().color(QPalette.ColorRole.Base).darker(103)
+        painter.fillRect(event.rect(), bg_color)
+
+        # Line numbers styling - VS Code Modern Gray
+        painter.setPen(QColor("#858585")) 
+        
+        # Use the editor's native font (which is already zoomed)
+        font = self.font()
+        # Make line numbers slightly smaller but strictly allow them to shrink without overlapping
+        # Modified to -1 so line numbers scale up visibly with default text size
+        font.setPointSize(max(1, font.pointSize() - 1))
+        painter.setFont(font)
+
+        block = self.document().begin()
+        current_block = self.textCursor().block().blockNumber()
+        
+        # We MUST use the document layout to get the true height of rich-text blocks
+        # cursorRect() fails for complex formats like pasted VSCode snippets
+        scroll_y = self.verticalScrollBar().value()
+        
+        while block.isValid():
+            block_rect = self.document().documentLayout().blockBoundingRect(block)
+            # Map document coordinates to viewport coordinates
+            top = block_rect.top() - scroll_y
+            bottom = top + block_rect.height()
+            
+            # Optimization: Only paint visible blocks
+            if top <= event.rect().bottom() and bottom >= event.rect().top():
+                if block.isVisible():
+                    # Highlight current line number
+                    if block.blockNumber() == current_block:
+                        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+                    else:
+                        painter.setPen(QColor("#858585"))
+                        
+                    number = str(block.blockNumber() + 1)
+                    # For wrapped lines, align to the top of the block with standard padding
+                    painter.drawText(0, int(top), self.line_number_area.width() - 8, int(block_rect.height()),
+                                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, number)
+            
+            if top > event.rect().bottom():
+                break
+                
+            block = block.next()
+
+    def sync_minimap_content(self):
+        if not self._show_minimap: return
+        
+        # Use plain text instead of HTML for a clean, structural outline
+        # This prevents huge headings or ugly formatted rich text from ruining the map
+        self.minimap.setPlainText(self.toPlainText())
+        
+        # Apply fixed microscopic font to the plain text 
+        # NOT affected by main editor zoom to keep Document Map aesthetics
+        font = self.minimap.font()
+        font.setFamily("Consolas" if os.name == 'nt' else "Monospace")
+        font.setPointSizeF(1.0)
+        self.minimap.setFont(font)
+        
+        # Apply a subtle gray color
+        palette = self.minimap.palette()
+        palette.setColor(QPalette.ColorRole.Text, QColor(130, 130, 130))
+        self.minimap.setPalette(palette)
+        
+        self.minimap.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+
+    def sync_minimap_scroll(self):
+        if not self._show_minimap: return
+        v_bar = self.verticalScrollBar()
+        m_bar = self.minimap.verticalScrollBar()
+        
+        # 1. Sync Minimap Scroll Position Proportionally
+        if v_bar.maximum() > 0:
+            ratio = v_bar.value() / v_bar.maximum()
+            m_bar.setValue(int(ratio * m_bar.maximum()))
+            
+        # 2. Position Viewfinder (Indicator) using Exact Block Mapping
+        # Find exactly which blocks are at the top and bottom of the current view
+        top_cursor = self.cursorForPosition(QPoint(0, 0))
+        bottom_cursor = self.cursorForPosition(QPoint(0, self.viewport().height()))
+        
+        top_block = top_cursor.block()
+        bottom_block = bottom_cursor.block()
+        
+        if top_block.isValid() and bottom_block.isValid():
+            # Find these same blocks in the minimap's document
+            m_doc = self.minimap.document()
+            m_top = m_doc.findBlockByNumber(top_block.blockNumber())
+            m_bottom = m_doc.findBlockByNumber(bottom_block.blockNumber())
+            
+            if m_top.isValid() and m_bottom.isValid():
+                m_layout = m_doc.documentLayout()
+                mini_top_rect = m_layout.blockBoundingRect(m_top)
+                mini_bottom_rect = m_layout.blockBoundingRect(m_bottom)
+                
+                # Convert from minimap document coordinates to minimap viewport coordinates
+                mini_scroll_y = m_bar.value()
+                
+                indicator_y = mini_top_rect.top() - mini_scroll_y
+                indicator_h = mini_bottom_rect.bottom() - mini_top_rect.top()
+                
+                # Ensure the indicator is visible and bounded
+                self.minimap.indicator.setGeometry(
+                    0, int(indicator_y), 
+                    self.minimap.width(), int(max(10, indicator_h))
+                )
+                self.minimap.indicator.raise_()
+
+    def update_line_number_area_width(self, _=0):
+        # Triggered by block count changes
+        self.update_sidebars_layout()
+
+    def line_number_area_width(self):
+        digits = 1
+        max_val = max(1, self.document().blockCount())
+        while max_val >= 10:
+            max_val /= 10
+            digits += 1
+        # Width depends on number of digits + padding
+        return 18 + self.fontMetrics().horizontalAdvance('9') * digits
+
+    def minimap_width(self):
+        return 165 if self._show_minimap else 0
+
+    def update_sidebars(self):
+        if self._show_line_numbers:
+            self.line_number_area.update()
+        if self._show_minimap:
+            self.sync_minimap_scroll()
+            self.minimap.update()
+
+    def toggle_dev_mode(self, visible):
+        self._show_line_numbers = visible
+        self._show_minimap = visible
+        self.line_number_area.setVisible(visible)
+        self.minimap.setVisible(visible)
+        
+        if visible:
+            self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+            self.sync_minimap_content()
+        else:
+            self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            
+        self.update_sidebars_layout()
+        self.highlight_current_line()
+
+    def highlight_current_line(self):
+        """Highlights the active line in Dev Mode, similar to VS Code."""
+        extra_selections = []
+
+        if not self.isReadOnly() and self._show_line_numbers:
+            selection = QTextEdit.ExtraSelection()
+            
+            # Subtly shade the background of the entire row (VS Code style)
+            is_dark = True
+            if hasattr(self, 'window') and self.window() and hasattr(self.window(), 'theme_manager'):
+                is_dark = self.window().theme_manager.is_dark_mode
+            
+            # Subtle transparent background overlay
+            line_color = QColor(255, 255, 255, 12) if is_dark else QColor(0, 0, 0, 12)
+            
+            selection.format.setBackground(line_color)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extra_selections.append(selection)
+
+        self.setExtraSelections(extra_selections)
 
     def _sync_initial_theme(self):
         """Finds main window and applies current theme colors."""
@@ -90,7 +401,7 @@ class NotePane(QTextEdit):
             is_dark = palette.get('is_dark', True)
             self.apply_theme_colors(text_color, is_dark)
 
-    # ── Text Color / Highlight Color / Font Size ──────────────────────
+    # â”€â”€ Text Color / Highlight Color / Font Size â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def set_font_size(self, size: int):
         """Apply explicit font size (pt) to current selection or next typed text."""
         if size <= 0:
@@ -163,7 +474,7 @@ class NotePane(QTextEdit):
         self._is_dirty = True
         self.content_changed.emit()
 
-    # ── Zoom In / Zoom Out ───────────────────────────────────────────
+    # â”€â”€ Zoom In / Zoom Out â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def zoom_in(self):
         """Increase zoom by 10%, max 300%."""
@@ -171,6 +482,7 @@ class NotePane(QTextEdit):
             self._zoom_factor += 10
             super().zoomIn(1)
             self._show_zoom_status()
+            if self._show_minimap: self.sync_minimap_content()
             logging.info(f"NotePane: Zoom In triggered. Current level: {self._zoom_factor}%")
 
     def zoom_out(self):
@@ -179,6 +491,7 @@ class NotePane(QTextEdit):
             self._zoom_factor -= 10
             super().zoomOut(1)
             self._show_zoom_status()
+            if self._show_minimap: self.sync_minimap_content()
             logging.info(f"NotePane: Zoom Out triggered. Current level: {self._zoom_factor}%")
 
     def zoom_reset(self):
@@ -191,11 +504,13 @@ class NotePane(QTextEdit):
             super().zoomIn(steps)
         self._zoom_factor = 100
         self._show_zoom_status()
+        if self._show_minimap: self.sync_minimap_content()
 
     def get_zoom(self):
         return self._zoom_factor
 
     def set_zoom(self, val):
+        val = int(val) if val else 100
         diff = val - self._zoom_factor
         steps = abs(diff) // 10
         if diff > 0:
@@ -203,6 +518,8 @@ class NotePane(QTextEdit):
         elif diff < 0:
             super().zoomOut(steps)
         self._zoom_factor = val
+        self._show_zoom_status()
+        if self._show_minimap: self.sync_minimap_content()
 
     def _show_zoom_status(self):
         """Show zoom level in status bar if available."""
@@ -402,7 +719,11 @@ class NotePane(QTextEdit):
 
     def load_deferred_content(self):
         """Loads the content only when actually needed (visible)."""
-        return self.paging_engine.load_deferred()
+        res = self.paging_engine.load_deferred()
+        if res:
+            self.sync_minimap_content()
+            self.sync_minimap_scroll()
+        return res
 
     def showEvent(self, event):
         """Triggered when the widget is shown. Perfect time for lazy loading."""
@@ -415,9 +736,46 @@ class NotePane(QTextEdit):
             self.paging_engine.set_content("")
             return
 
+        # Core Fix for Zoom Persistence: 
+        # Qt rigidly embeds the current zoomed font size into the <body style="..."> tag on save.
+        # This freezes zooming on restart because the explicit body size overrides the editor's zoom mechanism.
+        # We strip font-size from the <body> tag but preserve user's explicit font sizes inside the note.
+        import re
+        html = re.sub(r'(<body[^>]*?style="[^"]*?)font-size:\s*\d+(\.\d+)?p[tx];?\s*', r'\1', html, flags=re.IGNORECASE)
+
         processed = self.image_manager.process_html_for_insertion(html)
         self.paging_engine.set_content(processed)
         self._is_dirty = False
+
+    def convert_markdown_to_rich_text(self):
+        """Toggles between Markdown syntax and formatted Rich Text."""
+        from src.utils.md_utils import markdown_to_html, html_to_markdown
+        
+        if self._is_md_mode:
+            # 1. Switch to Rich Text
+            raw_text = self.toPlainText()
+            if raw_text.strip():
+                html = markdown_to_html(raw_text)
+                self.setHtml(html)
+            self._is_md_mode = False
+            msg = "Markdown -> Rich Text"
+        else:
+            # 2. Switch back to Markdown source
+            html = self.toHtml()
+            md = html_to_markdown(html)
+            self.setPlainText(md)
+            self._is_md_mode = True
+            msg = "Rich Text -> Markdown"
+        
+        # 3. Apply changes
+        self._is_dirty = True
+        self.content_changed.emit()
+        
+        # 4. Show feedback
+        main_win = self.window()
+        if hasattr(main_win, 'status_bar_manager'):
+            main_win.status_bar_manager.show_message(msg, 2000)
+            main_win.status_bar_manager.update_mode_label(self._is_md_mode)
         
     def highlight_search_result(self, query, line_number=0):
         """
@@ -552,7 +910,7 @@ class NotePane(QTextEdit):
             try:
                 # Plan v12.2: Use generator expression with sum() for O(1) space counting
                 return sum(1 for _ in re.finditer(pattern_str, content, flags=flags))
-            except:
+            except Exception:
                 # Fallback to simple count if regex fails (though re.escape should prevent it)
                 if not case_sensitive:
                     content = content.lower()
@@ -608,8 +966,7 @@ class NotePane(QTextEdit):
 
 
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
+
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -636,7 +993,7 @@ class NotePane(QTextEdit):
         c_left.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
         char_left = c_left.selectedText()
         
-        valid_chars = ["▢", "☑", "☐", "〇", "✅"]
+        valid_chars = ["â–¢", "â˜‘", "â˜", "ã€‡", "âœ…"]
         is_over_checkbox = char_right in valid_chars or char_left in valid_chars
         
         # 1. Checkboxes ALWAYS show hand cursor
@@ -724,7 +1081,7 @@ class NotePane(QTextEdit):
             c_left.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
             char_left = c_left.selectedText()
             
-            valid_chars = ["▢", "☑", "☐", "〇", "✅"]
+            valid_chars = ["â–¢", "â˜‘", "â˜", "ã€‡", "âœ…"]
             target_char = ""
             target_cursor = None
             
@@ -737,7 +1094,7 @@ class NotePane(QTextEdit):
             
             if target_char and target_cursor:
                 # Use the perfectly matched Ballot Box pair (U+2610 and U+2611)
-                new_char = "☑" if target_char in ["▢", "☐", "〇"] else "☐"
+                new_char = "â˜‘" if target_char in ["â–¢", "â˜", "ã€‡"] else "â˜"
                 
                 # Insert the new character
                 target_cursor.insertText(new_char)
@@ -746,7 +1103,7 @@ class NotePane(QTextEdit):
                 block_cursor = QTextCursor(cursor_pos)
                 block_cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
                 fmt = QTextCharFormat()
-                if new_char == "☑":
+                if new_char == "â˜‘":
                     fmt.setFontStrikeOut(True)
                     fmt.setForeground(QColor("#888888")) # Muted gray for completed tasks
                 else:
@@ -798,14 +1155,23 @@ class NotePane(QTextEdit):
         
         # 1. Clean up & Iconify Standard Actions
         icon_map = {
-            "Undo": "undo.svg", "Redo": "redo.svg", "Cut": "cut.svg", 
-            "Copy": "copy.svg", "Paste": "clipboard.svg", "Delete": "trash.svg", 
-            "Select All": "select-all.svg"
+            "Cut": "cut.svg", "Copy": "copy.svg", "Paste": "clipboard.svg", 
+            "Delete": "trash.svg", "Select All": "select-all.svg"
         }
         for action in menu.actions():
-            clean_text = action.text().replace("&", "")
+            clean_text = action.text().replace("&", "").split('\t')[0]
+            
+            # Remove Undo/Redo as requested
+            if clean_text in ("Undo", "Redo"):
+                menu.removeAction(action)
+                continue
+                
             if clean_text in icon_map:
                 action.setIcon(get_icon(icon_map[clean_text], is_dark))
+                
+        # Clean up orphaned separator at the top if any
+        if menu.actions() and menu.actions()[0].isSeparator():
+            menu.removeAction(menu.actions()[0])
 
         menu.addSeparator()
 
@@ -891,6 +1257,16 @@ class NotePane(QTextEdit):
             menu.insertAction(search_act, ai_act)
             menu.insertSeparator(actions[3])
 
+        # 8. Dev Mode Toggle (At the very bottom)
+        from PyQt6.QtWidgets import QApplication, QMainWindow
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, QMainWindow) and hasattr(w, 'menu_manager') and "dev_mode" in w.menu_manager.actions:
+                dev_mode_act = w.menu_manager.actions["dev_mode"]
+                dev_mode_act.setIcon(get_icon("code.svg", is_dark)) # Force set icon for context menu
+                menu.addSeparator()
+                menu.addAction(dev_mode_act)
+                break
+
         menu.exec(event.globalPos())
 
     def insert_horizontal_rule(self):
@@ -962,7 +1338,7 @@ class NotePane(QTextEdit):
             cfmt = QTextCharFormat()
             cfmt.setFontPointSize(current_size)
             cfmt.setFontFamily("Segoe UI Symbol")
-            cursor.insertText("☐", cfmt)
+            cursor.insertText("â˜", cfmt)
             
             # Reset format for the space and text that follows
             normal_fmt = QTextCharFormat()
@@ -1021,6 +1397,13 @@ class NotePane(QTextEdit):
 
 
     def insertFromMimeData(self, source):
+        """
+        Intelligent paste handler:
+        1. Handles direct image pasting.
+        2. Sanitizes incoming HTML (like VS Code snippets) to remove hardcoded font sizes so zoom works natively.
+        3. Chunks very large plain text pastes to prevent UI freezing.
+        """
+        # 1. Image interception
         if source.hasImage():
             image = source.imageData()
             if image:
@@ -1029,7 +1412,63 @@ class NotePane(QTextEdit):
                 processed_img = self.image_manager.process_html_for_insertion(f'<img src="data:image/png;base64,{base64_data}" />')
                 self.textCursor().insertHtml(processed_img)
                 return
-        super().insertFromMimeData(source)
+
+        # 2. Rich Text (HTML) Sanitization for Native Zoom Support
+        if source.hasHtml():
+            html = source.html()
+            # VS Code and browsers inject rigid font-sizes that break zooming.
+            # We strip font-size and line-height but KEEP font-family and colors.
+            import re
+            clean_html = re.sub(r'font-size:\s*[^;"]+;?', '', html, flags=re.IGNORECASE)
+            clean_html = re.sub(r'line-height:\s*[^;"]+;?', '', clean_html, flags=re.IGNORECASE)
+            
+            new_source = QMimeData()
+            new_source.setHtml(clean_html)
+            if source.hasText():
+                new_source.setText(source.text())
+            source = new_source
+
+        # 3. Large Plain Text Chunking (Prevents freezing)
+        if not source.hasText():
+            super().insertFromMimeData(source)
+            return
+
+        text = source.text()
+        SIZE_THRESHOLD = 1 * 1024 * 1024  # 1 MB
+
+        if len(text.encode('utf-8')) < SIZE_THRESHOLD:
+            # Small paste: use normal path (fastest, preserves HTML)
+            super().insertFromMimeData(source)
+            return
+
+        # Large paste fallback (inserts as plain text in chunks)
+        CHUNK_SIZE = 100_000
+        chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+        total = len(chunks)
+
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        try:
+            for i, chunk in enumerate(chunks):
+                cursor.insertText(chunk)
+                try:
+                    mw = self.window()
+                    if hasattr(mw, 'statusBar'):
+                        mw.statusBar().showMessage(
+                            f"Pasting large text... {i+1}/{total} ({(i+1)*100//total}%)", 0
+                        )
+                except Exception:
+                    pass
+                QApplication.processEvents()
+        finally:
+            cursor.endEditBlock()
+            try:
+                mw = self.window()
+                if hasattr(mw, 'statusBar'):
+                    size_mb = len(text.encode('utf-8')) / 1024 / 1024
+                    mw.statusBar().showMessage(f"Pasted {size_mb:.1f} MB of text.", 3000)
+            except Exception:
+                pass
 
     def insert_image_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
@@ -1048,56 +1487,6 @@ class NotePane(QTextEdit):
 
     def canInsertFromMimeData(self, source):
         return source.hasImage() or super().canInsertFromMimeData(source)
-
-    def insertFromMimeData(self, source):
-        """
-        Override paste to handle very large text without freezing the UI.
-        - Text < 1MB: normal Qt paste (fast, no intervention needed).
-        - Text >= 1MB: chunked insert with processEvents() to yield back to Qt
-          between chunks, while keeping the entire paste as ONE undo action.
-        """
-        if not source.hasText():
-            super().insertFromMimeData(source)
-            return
-
-        text = source.text()
-        SIZE_THRESHOLD = 1 * 1024 * 1024  # 1 MB
-
-        if len(text.encode('utf-8')) < SIZE_THRESHOLD:
-            # Small paste: use normal path (fastest, no overhead)
-            super().insertFromMimeData(source)
-            return
-
-        # Large paste: chunked insert to keep UI responsive
-        CHUNK_SIZE = 100_000  # 100K characters per chunk
-        chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
-        total = len(chunks)
-
-        cursor = self.textCursor()
-        cursor.beginEditBlock()  # All chunks = ONE Ctrl+Z undo action
-        try:
-            for i, chunk in enumerate(chunks):
-                cursor.insertText(chunk)
-                # Update status bar if available
-                try:
-                    mw = self.window()
-                    if hasattr(mw, 'statusBar'):
-                        mw.statusBar().showMessage(
-                            f"Pasting large text... {i+1}/{total} ({(i+1)*100//total}%)", 0
-                        )
-                except Exception:
-                    pass
-                QApplication.processEvents()  # Yield to Qt event loop (keeps UI alive)
-        finally:
-            cursor.endEditBlock()
-            try:
-                mw = self.window()
-                if hasattr(mw, 'statusBar'):
-                    size_mb = len(text.encode('utf-8')) / 1024 / 1024
-                    mw.statusBar().showMessage(f"Pasted {size_mb:.1f} MB of text.", 3000)
-            except Exception:
-                pass
-
 
     def _get_url_at_pos(self, pos):
         """Detects if a URL (anchor or plain text) exists at the given viewport position."""

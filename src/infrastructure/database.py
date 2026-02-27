@@ -1,4 +1,4 @@
-import sqlite3
+﻿import sqlite3
 import os
 import logging
 from PyQt6.QtCore import QStandardPaths
@@ -63,13 +63,26 @@ class DatabaseManager:
             );
             """)
 
-            # 2. Notes Metadata Table
+            # 2. Folders Table (NORMALIZATION - Plan v13.0)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                is_locked INTEGER DEFAULT 0,
+                password_hash TEXT,
+                color TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+            # 3. Notes Metadata Table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 obj_name TEXT UNIQUE NOT NULL,
                 title TEXT,
                 folder TEXT DEFAULT 'General',
+                folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
                 pinned INTEGER DEFAULT 0,
                 is_open INTEGER DEFAULT 1,
                 is_locked INTEGER DEFAULT 0,
@@ -80,9 +93,14 @@ class DatabaseManager:
             );
             """)
 
-            # Migration: Add is_open if it doesn't exist (Plan v8.1)
+            # Migration: Add relational pillars if they don't exist
             cursor.execute("PRAGMA table_info(notes);")
             columns = [col[1] for col in cursor.fetchall()]
+            
+            if "folder_id" not in columns:
+                logging.info("DatabaseManager: Migrating schema - adding 'folder_id' to 'notes' table.")
+                cursor.execute("ALTER TABLE notes ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;")
+            
             if "is_open" not in columns:
                 logging.info("DatabaseManager: Migrating schema - adding 'is_open' to 'notes' table.")
                 cursor.execute("ALTER TABLE notes ADD COLUMN is_open INTEGER DEFAULT 1;")
@@ -96,7 +114,10 @@ class DatabaseManager:
                 logging.info("DatabaseManager: Migrating schema - adding 'is_placeholder' to 'notes' table.")
                 cursor.execute("ALTER TABLE notes ADD COLUMN is_placeholder INTEGER DEFAULT 0;")
 
-            # 3. Notes Content Table (BLOB/HTML)
+            # [Relational Alignment] Ensure every note is linked to a Folder entry
+            self._run_folder_migration(cursor)
+
+            # 4. Notes Content Table (BLOB/HTML)
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS notes_content (
                 note_id INTEGER PRIMARY KEY,
@@ -105,7 +126,7 @@ class DatabaseManager:
             );
             """)
 
-            # 4. View to join Metadata and Content for FTS5 snippets
+            # 5. View to join Metadata and Content for FTS5 snippets
             cursor.execute("""
             CREATE VIEW IF NOT EXISTS v_notes_content AS 
             SELECT c.note_id as rowid, n.title, c.content 
@@ -113,10 +134,7 @@ class DatabaseManager:
             JOIN notes n ON n.id = c.note_id;
             """)
 
-            # 5. Global Search Virtual Table (FTS5)
-            # content='v_notes_content' allows FTS to mirror the View for snippet() perfectly
-            # Plan v12.5: REMOVED DROP TABLE. We only create if not exists to avoid 12MB index rebuild on every boot.
-            
+            # 6. Global Search Virtual Table (FTS5)
             cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
                 title, 
@@ -163,7 +181,7 @@ class DatabaseManager:
             END;
             """)
 
-            # 6. Browser Sessions Table (Plan v8.1 fix)
+            # 7. Browser Sessions Table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS browsers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +192,7 @@ class DatabaseManager:
             );
             """)
 
-            # 7. Note Links Table (Plan v12.6: For Knowledge Graph)
+            # 8. Note Links Table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS note_links (
                 source_id INTEGER NOT NULL,
@@ -193,6 +211,44 @@ class DatabaseManager:
                 self.conn.execute("ROLLBACK;")
             logging.error(f"DatabaseManager: Schema Intialization Error: {e}")
             raise
+
+    def _run_folder_migration(self, cursor):
+        """Migrates data from flat folder strings to relational folders table."""
+        import json
+        # 1. Normalize Folders: Create records in 'folders' for every unique string in 'notes.folder'
+        cursor.execute("SELECT DISTINCT folder FROM notes WHERE folder IS NOT NULL")
+        old_folders = [r[0] for r in cursor.fetchall()]
+        
+        # Ensure 'General' always exists as a root entry
+        if 'General' not in old_folders:
+            old_folders.append('General')
+            
+        for f_name in old_folders:
+            cursor.execute("INSERT OR IGNORE INTO folders (name) VALUES (?)", (f_name,))
+            
+        # 2. Link Notes: Update 'folder_id' by matching names
+        cursor.execute("SELECT id, folder FROM notes WHERE folder_id IS NULL AND folder IS NOT NULL")
+        notes_to_fix = cursor.fetchall()
+        for nid, f_name in notes_to_fix:
+            cursor.execute("SELECT id FROM folders WHERE name = ?", (f_name,))
+            f_row = cursor.fetchone()
+            if f_row:
+                cursor.execute("UPDATE notes SET folder_id = ? WHERE id = ?", (f_row[0], nid))
+
+        # 3. Migrate Vaults: Move folder locks from legacy app_settings JSON to the folders table
+        cursor.execute("SELECT value FROM app_settings WHERE key = 'locked_folders'")
+        row = cursor.fetchone()
+        if row:
+            try:
+                locks = json.loads(row[0])
+                for f_name, pwd_hash in locks.items():
+                    # Ensure folder entry exists before updating lock
+                    cursor.execute("INSERT OR IGNORE INTO folders (name) VALUES (?)", (f_name,))
+                    cursor.execute("UPDATE folders SET is_locked = 1, password_hash = ? WHERE name = ?", (pwd_hash, f_name))
+                # Cleanup legacy data
+                cursor.execute("DELETE FROM app_settings WHERE key = 'locked_folders'")
+            except Exception as e:
+                logging.error(f"DatabaseManager: Folder lock migration failed: {e}")
 
     def close(self):
         """Closes the connection cleanly."""

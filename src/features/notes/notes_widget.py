@@ -1,10 +1,11 @@
-import json
+﻿import json
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QSplitter, 
                              QToolBar, QMessageBox)
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextListFormat
 from PyQt6.QtCore import Qt
 
 from src.core.config import ConfigManager
+import logging
 
 class NotesWidget(QWidget):
     def __init__(self):
@@ -174,5 +175,5 @@ class NotesWidget(QWidget):
             else:
                 self.add_view() # Default
         except Exception as e:
-            print(f"Error loading notes: {e}")
+            logging.error(f"Error loading notes: {e}")
             self.add_view() # Fallback

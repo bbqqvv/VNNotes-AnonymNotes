@@ -1,15 +1,13 @@
-import os
+﻿import os
 import sys
+
+# os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] removed for stability
 
 # 1. FORCE SOFTWARE RENDERING (DIAMOND-STANDARD FIX FOR WHITE SCREEN)
 # MUST BE BEFORE ANY QT IMPORTS
 os.environ["QT_OPENGL"] = "software"
 os.environ["QTWEBENGINE_DISABLE_LOGGING"] = "1"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    "--disable-logging --log-level=3 --log-file=NUL "
-    "--disable-gpu --disable-gpu-compositing "
-    "--num-raster-threads=2 --enable-begin-frame-scheduling"
-)
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-gpu-compositing"
 
 # CRITICAL: Import WebEngine BEFORE QApplication to prevent context crashes
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -22,10 +20,10 @@ except:
     pass
 
 # 3. Windows Icon Fix (AppUserModelID) - MUST BE AT TOP
-if sys.platform == 'win32':
-    import ctypes
-    MY_APP_ID = 'vtech.vnnotes.stable.v3'
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(MY_APP_ID)
+# if sys.platform == 'win32':
+#     import ctypes
+#     MY_APP_ID = 'vtech.vnnotes.stable.v3'
+#     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(MY_APP_ID)
 
 # Add project root to path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -41,10 +39,16 @@ from src.core.logger import setup_logging
 def exception_hook(exctype, value, traceback_obj):
     import traceback
     traceback_str = "".join(traceback.format_exception(exctype, value, traceback_obj))
-    logging.critical(f"Uncaught Exception:\n{traceback_str}")
-    if QApplication.instance():
-        error_msg = f"An unexpected error occurred:\n{value}\n\nSee log file for details."
-        QMessageBox.critical(None, "VNNotes Crashed", error_msg)
+    with open("FATAL_CRASH.txt", "w", encoding="utf-8") as f:
+        f.write(traceback_str)
+    
+    try:
+        logging.critical(f"Uncaught Exception:\n{traceback_str}")
+        if QApplication.instance():
+            error_msg = f"An unexpected error occurred:\n{value}\n\nSee log file for details."
+            QMessageBox.critical(None, "VNNotes Crashed", error_msg)
+    except Exception:
+        pass
 
 def main():
     sys.excepthook = exception_hook
@@ -55,11 +59,10 @@ def main():
     # However, 'Round' completely broke text element bounding boxes at 125% scales
     # causing letters to overlap. We revert to default Qt6 behavior.
     
-    # Ensure DWM (Windows Taskbar) can correctly see the window buffers
-    # v7.0: Removed AA_UseDesktopOpenGL as it conflicts with Software Rendering.
     # Added AA_ShareOpenGLContexts for WebEngine stability.
-    # MUST BE DONE BEFORE IMPORTING ANY WEB ENGINE CLASSES
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    # MUST BE DONE BEFORE CONSTRUCTING QApplication
+    from PyQt6.QtCore import QCoreApplication
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     
     QApplication.setOrganizationName("vtechdigitalsolution")
     QApplication.setApplicationName("VNNotes")
@@ -82,17 +85,17 @@ def main():
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
         
+    # Ensure application quits completely when the main window is closed
     app.setQuitOnLastWindowClosed(True) 
     
     window = MainWindow()
     window.show()
 
     try:
+        logging.info("Starting app.exec()")
         sys.exit(app.exec())
     except Exception as e:
         logging.critical(f"Main Loop Crash: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
-
-

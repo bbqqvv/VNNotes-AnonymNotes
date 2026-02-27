@@ -1,4 +1,4 @@
-"""
+﻿"""
 Compact Find Bar that overlays the top-right corner of the editor.
 Theme-aware: adapts to dark/light mode from MainWindow.current_theme.
 Auto-expanding input: grows vertically when long text is pasted (like VS Code).
@@ -14,7 +14,7 @@ from src.utils.ui_utils import get_icon
 
 logger = logging.getLogger(__name__)
 
-# ── Theme palettes ────────────────────────────────────────────────────
+# â”€â”€ Theme palettes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 DARK = {
     "bg": "#2b2b2b", "surface": "#333333", "text": "#eeeeee", "accent": "#3498db", "border": "#444444"
 }

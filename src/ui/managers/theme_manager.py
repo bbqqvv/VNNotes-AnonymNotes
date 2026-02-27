@@ -1,4 +1,4 @@
-import os
+﻿import os
 from PyQt6.QtGui import QIcon, QPalette, QColor
 from PyQt6.QtWidgets import QMainWindow, QDockWidget, QApplication
 
@@ -35,7 +35,7 @@ class ThemeManager:
             "selection": "#eff6ff", "hover": "#f1f5f9", "is_dark": False
         },
         "sepia": { # Reading Mode
-            "bg": "#fdf6e3", "surface": "#eee8d5", "border": "#d33682",
+            "bg": "#fdf6e3", "surface": "#eee8d5", "border": "#decbb7",
             "text": "#586e75", "text_muted": "#93a1a1", "accent": "#b58900",
             "selection": "#eee8d5", "hover": "#d8d1bc", "is_dark": False
         },
@@ -120,10 +120,12 @@ class ThemeManager:
         if app:
             app.setStyleSheet(style)
         
-        # Update Sidebar Icons
-        if hasattr(self.main_window, 'sidebar'):
-             self.main_window.sidebar.update_toolbar_icons()
-             self.main_window.sidebar.refresh_tree()
+        # Update Sidebar Icons (Plan v8.18: Robust checks for testing)
+        if hasattr(self.main_window, 'sidebar') and self.main_window.sidebar:
+             if hasattr(self.main_window.sidebar, 'update_toolbar_icons'):
+                 self.main_window.sidebar.update_toolbar_icons()
+             if hasattr(self.main_window.sidebar, 'refresh_tree'):
+                 self.main_window.sidebar.refresh_tree()
         
         if hasattr(self.main_window, 'menu_manager'):
              self.main_window.menu_manager.update_icons()

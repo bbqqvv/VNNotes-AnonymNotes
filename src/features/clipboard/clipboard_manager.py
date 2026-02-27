@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QObject, pyqtSignal, QMimeData
+﻿from PyQt6.QtCore import QObject, pyqtSignal, QMimeData
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QImage
 
@@ -15,7 +15,7 @@ class ClipboardManager(QObject):
     def on_clipboard_change(self):
         mime_data = self.clipboard.mimeData()
         
-        item = {}
+        item = None
         if mime_data.hasImage():
             image = self.clipboard.image()
             if not image.isNull():
@@ -35,23 +35,26 @@ class ClipboardManager(QObject):
             }
         elif mime_data.hasText():
             text = mime_data.text()
-            if not text.strip():
+            if text.strip():
+                item = {
+                    "type": "text",
+                    "data": text,
+                    "preview": text[:100].strip().replace("\n", " ")
+                }
+        
+        if not item:
+            return
+
+        # [ULTIMATE SAFETY FIX] Defensive comparison using .get("data")
+        new_data = item.get("data")
+        if self.history:
+            prev_data = self.history[0].get("data")
+            if new_data == prev_data:
                 return
-            item = {
-                "type": "text",
-                "data": text,
-                "preview": text[:100].strip().replace("\n", " ")
-            }
-        else:
-            return
 
-        # Avoid exact duplicates at the top (check data)
-        if self.history and self.history[0].get("data") == item["data"]:
-            return
-
-        # Remove if exists elsewhere (simplistic check for strings, images always new for now)
-        if item["type"] == "text":
-            self.history = [h for h in self.history if h.get("data") != item["data"]]
+        # Remove if exists elsewhere for text (prevent spam)
+        if item.get("type") == "text":
+            self.history = [h for h in self.history if h.get("data") != new_data]
 
         self.history.insert(0, item)
         

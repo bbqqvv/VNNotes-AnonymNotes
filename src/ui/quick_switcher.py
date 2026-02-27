@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import logging
 from PyQt6.QtWidgets import (QFrame, QVBoxLayout, QLineEdit, QListWidget, 
                              QListWidgetItem, QApplication, QGraphicsDropShadowEffect)
@@ -177,7 +177,7 @@ class QuickSwitcher(QFrame):
                 display_text = note["title"]
                 if note["isOpen"]:
                     # Small indicator for open tabs
-                    display_text = f"● {note['title']}"
+                    display_text = f"â— {note['title']}"
                 
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, note["id"])

@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QDockWidget, QMessageBox
+﻿from PyQt6.QtWidgets import QDockWidget, QMessageBox
 from PyQt6.QtCore import Qt
 from PyQt6 import sip
 import uuid
@@ -13,6 +13,7 @@ class DockManager:
     def __init__(self, main_window):
         self.main_window = main_window
         self._registry = {}  # obj_name -> QDockWidget
+        self._identity_recursion_guard = False # Fixes AttributeError Crash
 
     def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None, zoom=100):
         if not obj_name:
@@ -43,6 +44,10 @@ class DockManager:
         note_pane = NotePane(zoom=zoom)
         note_pane.setObjectName(obj_name) # CRITICAL for Zero-Lag sync
         note_pane.file_path = file_path
+        # Apply Advanced Editor Preferences (Dev Mode)
+        dev_mode = self.main_window.config.get_value("editor/dev_mode", "false").lower() == "true"
+        note_pane.toggle_dev_mode(dev_mode)
+        
         if content is not None:
             # CORRECT: Use the manager's setter instead of setting on the editor directly
             note_pane.paging_engine.set_deferred_content(content)
@@ -265,21 +270,115 @@ class DockManager:
                 self.main_window.sidebar.refresh_tree()
             except RuntimeError: pass
 
-    def _update_dock_identity(self, dock, title=None):
-        """Clean ToolTip (v7.1 -> v12.7): Adds folder context for notes."""
-        try:
-            actual_title = title or dock.windowTitle()
-            obj_name = dock.objectName()
-            
-            if obj_name.startswith("NoteDock_") and hasattr(self.main_window, 'note_service'):
-                note = self.main_window.note_service.get_note_by_id(obj_name)
-                if note:
-                    folder = note.get("folder", "General")
-                    dock.setToolTip(f"{actual_title} (Folder: {folder})")
-                    return
+    def _get_base_title(self, title):
+        """Strips ' (N)' suffix to find the intentional name (Plan v13.6)."""
+        if not title: return ""
+        import re
+        match = re.search(r" \((\d+)\)$", title)
+        if match:
+            return title[:match.start()].strip()
+        return title.strip()
 
+    def _update_dock_identity(self, dock, title=None):
+        """
+        Standardized dynamic title & identification manager (v13.9 Group-Wide Natural Sort).
+        Ensures tab numbering follows opening order (1, 2, 3) and updates the whole group.
+        """
+        if self._identity_recursion_guard:
+             return
+             
+        try:
+            self._identity_recursion_guard = True
+            
+            from src.features.notes.note_pane import NotePane
+            from PyQt6 import sip
+            
+            if sip.isdeleted(dock): return
+            
+            obj_name = dock.objectName()
+            widget = dock.widget()
+            
+            if isinstance(widget, NotePane) and obj_name.startswith("NoteDock_") and hasattr(self.main_window, 'note_service'):
+                # 1. Get Base Identity
+                note = self.main_window.note_service.get_note_by_id(obj_name)
+                db_title = note.get("title", "Note") if note else (dock.property("vnn_intentional_title") or dock.windowTitle())
+                base_title = self._get_base_title(db_title)
+                folder = note.get("folder", "General") if note else "General"
+                
+                # 2. Group-Wide Update: Find all docks sharing this base title
+                all_docks = self.get_all_content_docks()
+                related_group = []
+                for d in all_docks:
+                    try:
+                        if not sip.isdeleted(d) and d.objectName().startswith("NoteDock_"):
+                            # Get the intentional title of each dock in the group
+                            # We check DB first, then property, then windowTitle
+                            d_note = self.main_window.note_service.get_note_by_id(d.objectName())
+                            d_db_title = d_note.get("title", "Note") if d_note else (d.property("vnn_intentional_title") or d.windowTitle())
+                            d_base = self._get_base_title(d_db_title)
+                            
+                            if d_base.lower() == base_title.lower():
+                                related_group.append(d)
+                    except (RuntimeError, AttributeError): continue
+
+                # 3. Sort by Visual Index (Natural Sort fallback)
+                def get_sort_key(d):
+                    # Try to get visual index from TabManager for left-to-right numbering
+                    visual_idx = 9999
+                    if hasattr(self.main_window, 'tab_manager'):
+                        from PyQt6.QtWidgets import QTabBar
+                        tabbars = self.main_window.findChildren(QTabBar)
+                        for tb in tabbars:
+                            if not sip.isdeleted(tb):
+                                for i in range(tb.count()):
+                                    # Cross-call to TabManager to find which dock is at which tab
+                                    if self.main_window.tab_manager._get_dock_at_index(tb, i) == d:
+                                        visual_idx = i
+                                        break
+                            if visual_idx != 9999: break
+                    
+                    opening_order = 0
+                    try:
+                        opening_order = int(d.objectName().split("_")[1])
+                    except Exception: pass
+                    
+                    return (visual_idx, opening_order)
+                
+                related_group.sort(key=get_sort_key)
+                
+                has_collision = len(related_group) > 1
+
+                # 4. Update EVERY dock in the group to ensure consistency
+                for idx, group_dock in enumerate(related_group):
+                    g_note = self.main_window.note_service.get_note_by_id(group_dock.objectName())
+                    g_db_title = g_note.get("title", "Note") if g_note else (group_dock.property("vnn_intentional_title") or group_dock.windowTitle())
+                    g_base = self._get_base_title(g_db_title)
+                    
+                    # Store intentional title (clean) for persistence
+                    if not group_dock.property("vnn_intentional_title"):
+                         group_dock.setProperty("vnn_intentional_title", g_db_title)
+
+                    target_title = g_db_title
+                    if has_collision:
+                        # Follow opening order: (1), (2), (3)...
+                        target_title = f"{g_base} ({idx + 1})"
+                    
+                    if group_dock.windowTitle() != target_title:
+                        group_dock.setWindowTitle(target_title)
+                    
+                    # Simplified Tooltip for the group
+                    group_dock.setToolTip(target_title)
+                return
+
+            # Default fallback for browsers or non-note docks
+            actual_title = title or dock.windowTitle()
             dock.setToolTip(actual_title)
-        except RuntimeError: pass
+            
+        except (RuntimeError, AttributeError) as e:
+            import logging
+            logging.debug(f"DockManager: _update_dock_identity failed: {e}")
+        finally:
+            self._identity_recursion_guard = False
 
     def _on_dock_destroyed(self, dock):
         # Clean up registry
@@ -330,6 +429,16 @@ class DockManager:
     def get_note_docks(self):
         """Returns only note docks."""
         return [d for d in self.get_all_content_docks() if d.objectName().startswith("NoteDock_")]
+
+    def refresh_all_note_titles(self):
+        """Re-calculates (1), (2), (3) for all open notes (e.g. after tab move)."""
+        seen_bases = set()
+        for dock in self.get_note_docks():
+            db_title = dock.property("vnn_intentional_title") or dock.windowTitle()
+            base = self._get_base_title(db_title).lower()
+            if base not in seen_bases:
+                self._update_dock_identity(dock)
+                seen_bases.add(base)
 
     def get_browser_docks(self):
         """Returns only browser docks."""

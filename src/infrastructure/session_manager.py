@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import threading
 from PyQt6.QtCore import QTimer, QByteArray, Qt
 from PyQt6.QtWidgets import QDockWidget
@@ -67,9 +67,12 @@ class SessionManager:
                     content = widget.toHtml()
                 
                 # Sync metadata and content for this specific note
+                # Plan v13.7: Use intentional title (clean) to avoid persisting (1), (2) disambiguation
+                title = dock.property("vnn_intentional_title") or dock.windowTitle()
+                
                 note_data = {
                     "obj_name": obj_name,
-                    "title": dock.windowTitle(),
+                    "title": title,
                     "content": content,
                     "zoom": widget.get_zoom() if hasattr(widget, 'get_zoom') else 100
                 }
@@ -134,9 +137,12 @@ class SessionManager:
                     else:
                         content = widget.toHtml()
 
+                    # Plan v13.7: Use intentional title (clean) for persistence
+                    title = dock.property("vnn_intentional_title") or dock.windowTitle()
+
                     notes_data.append({
                         "obj_name": obj_name, 
-                        "title": dock.windowTitle(), 
+                        "title": title, 
                         "content": content,
                         "zoom": widget.get_zoom() if hasattr(widget, 'get_zoom') else 100
                     })
@@ -199,6 +205,9 @@ class SessionManager:
                 # Optimized Restoration Loop
                 for i, item in enumerate(notes):
                     if i >= 15: break 
+                    if not hasattr(mw, 'note_service'):
+                        logging.error("SessionManager: SKIP RESTORE - MainWindow missing note_service")
+                        break
                     dock = mw.add_note_dock(
                         content=item.get("content", ""), 
                         title=item.get("title"), 
@@ -209,6 +218,7 @@ class SessionManager:
                     if not anchor_dock: anchor_dock = dock
                     
                 for i, item in enumerate(browsers):
+                    break # Disable QWebEngine for Python 3.14 stability
                     if i >= 10: break
                     dock = mw.add_browser_dock(
                         url=item.get("url", "https://google.com"),
@@ -218,7 +228,7 @@ class SessionManager:
                     if not anchor_dock: anchor_dock = dock
 
             # 2. Restore Geometry & Dock State
-            # Skip restoreState on fresh launch — no valid state exists,
+            # Skip restoreState on fresh launch â€” no valid state exists,
             # and calling it would displace the newly created default dock.
             try:
                 geo = self.config.get_value("window/geometry")
@@ -246,7 +256,7 @@ class SessionManager:
             if hasattr(mw, 'sidebar'):
                 mw.sidebar.refresh_tree()
                 
-            # ── POST-RESTORE DOCK AREA SWEEP (DEFERRED) ──
+            # â”€â”€ POST-RESTORE DOCK AREA SWEEP (DEFERRED) â”€â”€
             # Must run AFTER the event loop settles; doing addDockWidget/tabifyDockWidget
             # during restoreState internals can segfault.  We schedule it for 0ms later.
             def _deferred_dock_sweep():

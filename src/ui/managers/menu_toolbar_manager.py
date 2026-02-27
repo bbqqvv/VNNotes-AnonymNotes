@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QToolBar, QMenu, QLabel, QWidget, QSizePolicy, QSlider, QComboBox, QPushButton, QHBoxLayout, QToolButton
+﻿from PyQt6.QtWidgets import QToolBar, QMenu, QLabel, QWidget, QSizePolicy, QSlider, QComboBox, QPushButton, QHBoxLayout, QToolButton
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon, QAction
 import os
@@ -98,6 +98,12 @@ class MenuToolbarManager:
                           self.main_window.tab_manager.close_all_tabs_app_wide)
         self.create_action("reopen_tab", "Reopen Closed Tab", "Reopen Last Closed Tab (Ctrl+Shift+T)", "Ctrl+Shift+T",
                           self.main_window.reopen_last_closed_tab)
+        
+        # Tab Navigation
+        self.create_action("next_tab", "Next Tab", "Switch to Next Tab (Ctrl+Tab)", None,
+                          self.main_window.tab_manager.switch_to_next_tab)
+        self.create_action("prev_tab", "Previous Tab", "Switch to Previous Tab (Ctrl+Shift+Tab)", None,
+                          self.main_window.tab_manager.switch_to_previous_tab)
 
         # --- Special Actions (Toggleable) ---
         # Ghost Actions
@@ -155,6 +161,14 @@ class MenuToolbarManager:
         autosave_act.triggered.connect(self.main_window.toggle_autosave)
         self.actions["autosave"] = autosave_act
 
+        # Editor View Features (Combined Dev Mode)
+        devmode_act = QAction(self._icon("code.svg"), "Dev Mode", self.main_window)
+        devmode_act.setToolTip("Enable Code Editor mode (Line Numbers, Minimap, No Text Wrap)")
+        devmode_act.setCheckable(True)
+        devmode_act.setChecked(self.main_window.config.get_value("editor/dev_mode", "false").lower() == "true")
+        devmode_act.triggered.connect(self.main_window.toggle_dev_mode)
+        self.actions["dev_mode"] = devmode_act
+
         # Theme Actions
         self.actions["themes"] = {} # Sub-dictionary for theme actions
         themes = self.main_window.theme_manager.THEME_CONFIG
@@ -210,7 +224,7 @@ class MenuToolbarManager:
         spacer_left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer_left)
 
-        # ── Font Size Combo ──────────────────────────────────────────────
+        # â”€â”€ Font Size Combo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self.font_size_combo = QComboBox()
         self.font_size_combo.setEditable(True)
         self.font_size_combo.setFixedSize(56, 24)
@@ -227,7 +241,7 @@ class MenuToolbarManager:
         )
         toolbar.addWidget(self.font_size_combo)
 
-        # ── Text Color Button ────────────────────────────────────────────
+        # â”€â”€ Text Color Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         from PyQt6.QtGui import QColor as _QC, QPixmap as _QP, QPainter as _QPn, QFont as _QFo
         self.text_color_btn = QToolButton()
         self.text_color_btn.setAutoRaise(True)
@@ -237,7 +251,7 @@ class MenuToolbarManager:
         self.text_color_btn.clicked.connect(self.main_window.pick_text_color)
         toolbar.addWidget(self.text_color_btn)
 
-        # ── Highlight Color Button ───────────────────────────────────────
+        # â”€â”€ Highlight Color Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self.highlight_color_btn = QToolButton()
         self.highlight_color_btn.setAutoRaise(True)
         self.highlight_color_btn.setToolTip("Highlight Color")
@@ -251,12 +265,12 @@ class MenuToolbarManager:
         toolbar.addAction(self.actions["align-center"])
         toolbar.addAction(self.actions["align-right"])
         
-        # ─── Expanding Spacer (Push Search/Ghost to the right) ───
+        # â”€â”€â”€ Expanding Spacer (Push Search/Ghost to the right) â”€â”€â”€
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         toolbar.addWidget(spacer)
 
-        # ─── Right Side Actions Group ───
+        # â”€â”€â”€ Right Side Actions Group â”€â”€â”€
         right_container = QWidget()
         right_container.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         right_layout = QHBoxLayout(right_container)
@@ -338,6 +352,8 @@ class MenuToolbarManager:
             for action in dock_menu.actions():
                 view_menu.addAction(action)
             view_menu.addSeparator()
+            
+
         
         if "sidebar" in self.actions:
             view_menu.addAction(self.actions["sidebar"])
@@ -345,7 +361,10 @@ class MenuToolbarManager:
         view_menu.addAction(self.actions["stealth"])
         view_menu.addAction(self.actions["always_on_top"])
         view_menu.addAction(self.actions["ghost_click"])
-        view_menu.addAction(self.actions["restore_grid"])
+
+        view_menu.addSeparator()
+        editor_menu = view_menu.addMenu("Editor")
+        editor_menu.addAction(self.actions["dev_mode"])
         
         view_menu.addSeparator()
         view_menu.addSeparator()

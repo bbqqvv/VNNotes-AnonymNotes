@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import re
 import base64
@@ -12,7 +12,7 @@ from PyQt6.QtCore import QUrl
 from src.utils.ui_utils import get_icon_dir, get_icon
 
 
-# Default palette (zinc) — used when no theme config is passed
+# Default palette (zinc) â€” used when no theme config is passed
 _DEFAULT_THEME = {
     "bg": "#09090b", "surface": "#18181b", "border": "#27272a",
     "text": "#f4f4f5", "text_muted": "#a1a1aa", "accent": "#3b82f6",
@@ -41,7 +41,7 @@ class TeleprompterDialog(QDialog):
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
             # Enable Stealth (Anti-Capture)
-            from src.core.stealth import StealthManager
+            from src.infrastructure.stealth import StealthManager
             hwnd = int(self.winId())
             StealthManager.set_stealth_mode(hwnd, True)
             StealthManager.set_click_through(hwnd, False)
@@ -79,14 +79,14 @@ class TeleprompterDialog(QDialog):
             logging.critical(f"Failed to initialize TeleprompterDialog: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Teleprompter: {e}")
 
-    # ── UI Construction ──────────────────────────────────────────────
+    # â”€â”€ UI Construction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _build_ui(self, content):
         tc = self.tc
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
-        # ── Main Glass Frame ──
+        # â”€â”€ Main Glass Frame â”€â”€
         self.bg_frame = QFrame(self)
         self.bg_frame.setObjectName("HudFrame")
         self._apply_frame_style(locked=False)
@@ -95,7 +95,7 @@ class TeleprompterDialog(QDialog):
         inner.setContentsMargins(0, 0, 0, 0)
         inner.setSpacing(0)
 
-        # ── Header ──
+        # â”€â”€ Header â”€â”€
         header = QFrame()
         header.setFixedHeight(40)
         header.setStyleSheet(f"""
@@ -135,7 +135,7 @@ class TeleprompterDialog(QDialog):
         """)
 
         # Play state indicator dot
-        self.state_dot = QLabel("●")
+        self.state_dot = QLabel("â—")
         self.state_dot.setStyleSheet(f"color: {tc['text_muted']}; font-size: 8px; background: transparent;")
 
         # Lock button
@@ -157,7 +157,7 @@ class TeleprompterDialog(QDialog):
         h_layout.addWidget(self.btn_lock)
         h_layout.addWidget(self.btn_close)
 
-        # ── Text Area ──
+        # â”€â”€ Text Area â”€â”€
         self.text_edit = QTextEdit()
         self._set_html_safe(content)
         self.text_edit.setReadOnly(True)
@@ -174,7 +174,7 @@ class TeleprompterDialog(QDialog):
             }}
         """)
 
-        # ── Controls Pill ──
+        # â”€â”€ Controls Pill â”€â”€
         self.controls = QWidget()
         self.controls.setFixedHeight(46)
         self.controls.setStyleSheet(f"""
@@ -231,7 +231,7 @@ class TeleprompterDialog(QDialog):
         c_layout.addWidget(opacity_icon)
         c_layout.addWidget(self.slide_opacity)
 
-        # ── Toast Overlay ──
+        # â”€â”€ Toast Overlay â”€â”€
         self.toast_lbl = QLabel("Click-Through Enabled\nCtrl+Shift+F9 to unlock", self)
         self.toast_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.toast_lbl.setStyleSheet(f"""
@@ -247,13 +247,13 @@ class TeleprompterDialog(QDialog):
         self.toast_lbl.adjustSize()
         self.toast_lbl.hide()
 
-        # ── Assembly ──
+        # â”€â”€ Assembly â”€â”€
         inner.addWidget(header)
         inner.addWidget(self.text_edit, 1)
         inner.addWidget(self.controls)
         root.addWidget(self.bg_frame)
 
-    # ── Widget Factories ─────────────────────────────────────────────
+    # â”€â”€ Widget Factories â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _make_header_btn(self, icon_name, tooltip, is_dark=True, is_close=False):
         btn = QPushButton()
@@ -356,7 +356,7 @@ class TeleprompterDialog(QDialog):
                 }}
             """)
 
-    # ── HTML Loading ─────────────────────────────────────────────────
+    # â”€â”€ HTML Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _set_html_safe(self, html):
         """Loads HTML content, extracting inline base64 images as resources."""
@@ -386,7 +386,7 @@ class TeleprompterDialog(QDialog):
         processed = re.sub(pattern, replace_match, html)
         self.text_edit.setHtml(processed)
 
-    # ── Logic ────────────────────────────────────────────────────────
+    # â”€â”€ Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _set_speed(self, val):
         self.scroll_speed = val
@@ -454,7 +454,7 @@ class TeleprompterDialog(QDialog):
 
     def _toggle_click_through(self, checked):
         self.is_click_through = checked
-        from src.core.stealth import StealthManager
+        from src.infrastructure.stealth import StealthManager
         tc = self.tc
 
         if checked:
@@ -525,7 +525,7 @@ class TeleprompterDialog(QDialog):
         if new_size != self.font_size:
             self._set_font_size(new_size)
 
-    # ── Window Drag ──────────────────────────────────────────────────
+    # â”€â”€ Window Drag â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _setup_drag(self):
         self._drag_active = False
@@ -549,7 +549,7 @@ class TeleprompterDialog(QDialog):
     def mouseReleaseEvent(self, event):
         self._drag_active = False
 
-    # ── Auto-hide controls while playing ─────────────────────────────
+    # â”€â”€ Auto-hide controls while playing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def enterEvent(self, event):
         if not self.is_click_through:
