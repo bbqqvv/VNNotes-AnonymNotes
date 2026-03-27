@@ -3,7 +3,7 @@
 
 #define MyAppName "VNNotes"
 #ifndef MyAppVersion
-  #define MyAppVersion "2.0.1.1"
+  #define MyAppVersion "2.1.1"
 #endif
 #define MyAppPublisher "VTech Digital Solution"
 #define MyAppURL "https://github.com/bbqqvv/VNNotes"
