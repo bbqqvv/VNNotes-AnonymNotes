@@ -54,3 +54,12 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Registry]
+; Register custom URI scheme 'vnnotes://' for Deep Linking
+Root: HKCU; Subkey: "Software\Classes\vnnotes"; ValueType: string; ValueName: ""; ValueData: "URL:VNNotes Protocol"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\vnnotes"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\vnnotes\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"
+Root: HKCU; Subkey: "Software\Classes\vnnotes\shell"; ValueType: string; ValueName: ""; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\vnnotes\shell\open"; ValueType: string; ValueName: ""; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\vnnotes\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""

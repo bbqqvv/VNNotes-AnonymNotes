@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sys
 
 # os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] removed for stability
@@ -82,7 +82,12 @@ def main():
     QApplication.setOrganizationName("vtechdigitalsolution")
     QApplication.setApplicationName("VNNotes")
     
-    app = QApplication(sys.argv)
+    from src.core.single_app import SingleApplication
+    app = SingleApplication(sys.argv)
+    
+    if app.is_running():
+        logging.info("VNNotes is already running. Delegated launch parameters and exiting.")
+        sys.exit(0)
     
     # Safe to import MainWindow now that QApplication has the correct context flags
     from src.ui.main_window import MainWindow
@@ -104,6 +109,13 @@ def main():
     app.setQuitOnLastWindowClosed(True) 
     
     window = MainWindow()
+    
+    # Connecting IPC to MainWindow
+    app.message_received.connect(window.handle_custom_uri)
+    if len(sys.argv) > 1 and "vnnotes://" in sys.argv[1]:
+        # Handle deep link from first launch
+        window.handle_custom_uri(sys.argv[1])
+        
     window.show()
 
     try:

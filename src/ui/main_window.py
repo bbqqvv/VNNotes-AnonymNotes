@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import sys
 import threading
@@ -440,7 +440,44 @@ class MainWindow(QMainWindow):
             self.showNormal()
         self.raise_()
 
+    @pyqtSlot(str)
+    def handle_custom_uri(self, uri: str):
+        """Handle incoming vnnotes:// deep links."""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            # Handle quotes that might be passed from sys.argv
+            uri = uri.strip('"').strip("'")
+            
+            # Simple FOCUS command check
+            if uri == "FOCUS":
+                self.showNormal()
+                self.raise_()
+                self.activateWindow()
+                return
 
+            parsed = urlparse(uri)
+            if parsed.scheme != "vnnotes": return
+            
+            if parsed.netloc == "install-plugin":
+                qs = parse_qs(parsed.query)
+                plugin_id = qs.get("id", [""])[0]
+                url = qs.get("url", [""])[0]
+                
+                if plugin_id and url:
+                    reply = QMessageBox.question(
+                        self, "Install Plugin", 
+                        f"The Web Market is requesting to install the '{plugin_id}' plugin.\n\nDo you want to proceed?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.plugin_manager.install_plugin_from_url(url)
+                        
+            # Focus window
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        except Exception as e:
+            logging.error(f"Failed to handle custom URI '{uri}': {e}")
 
     def focus_sidebar_search(self):
         """Toggles the sidebar search bar."""
