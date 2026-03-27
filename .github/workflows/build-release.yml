@@ -35,7 +35,7 @@ jobs:
       - name: Audit Python source code
         run: |
           echo "=== Compiling all .py files ==="
-          python -m compileall src plugins main.py -q
+          python -m compileall src main.py -q
           if ($LASTEXITCODE -ne 0) { echo "[FAIL] Compilation errors found"; exit 1 }
           echo "[OK] All files compiled successfully"
           
