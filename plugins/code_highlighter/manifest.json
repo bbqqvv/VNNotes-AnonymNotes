@@ -1,8 +1,0 @@
-{
-    "id": "code_highlighter",
-    "name": "Syntax Highlighter",
-    "version": "1.0.0",
-    "author": "VTech Digital Solutions",
-    "description": "Professional syntax highlighting for Python, JS, and C++ in Dev Mode.",
-    "entry_point": "plugin.py"
-}

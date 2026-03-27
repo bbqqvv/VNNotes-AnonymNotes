@@ -1,8 +1,0 @@
-{
-    "id": "hello_world",
-    "name": "Hello World Extension",
-    "version": "1.0.0",
-    "author": "Antigravity",
-    "description": "A simple example plugin to demonstrate the extension system.",
-    "entry_point": "plugin.py"
-}
