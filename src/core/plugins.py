@@ -212,6 +212,52 @@ class PluginManager:
             logger.error(f"Failed to download/install plugin from URL: {e}")
             return False, f"Download failed: {str(e)}"
 
+    def uninstall_plugin(self, plugin_id: str) -> Tuple[bool, str]:
+        """Deactivates and deletes a plugin from disk by ID."""
+        import shutil
+        try:
+            # 1. Deactivate if running
+            if plugin_id in self.plugins:
+                try:
+                    logger.info(f"Deactivating plugin {plugin_id} before uninstall...")
+                    self.plugins[plugin_id].deactivate()
+                except Exception as e:
+                    logger.error(f"Error deactivating plugin during uninstall: {e}")
+                del self.plugins[plugin_id]
+                
+            # 2. Find folder containing the manifest with this ID
+            plugin_folder_path = None
+            if os.path.exists(self.plugins_dir):
+                for folder_name in os.listdir(self.plugins_dir):
+                    fp = os.path.join(self.plugins_dir, folder_name)
+                    if not os.path.isdir(fp): continue
+                    
+                    mp = os.path.join(fp, "manifest.json")
+                    if os.path.exists(mp):
+                        with open(mp, 'r', encoding='utf-8') as f:
+                            manifest = json.load(f)
+                            if manifest.get('id') == plugin_id:
+                                plugin_folder_path = fp
+                                break
+                                
+            if not plugin_folder_path:
+                return False, f"Plugin {plugin_id} not found on disk."
+                
+            # 3. Delete directory
+            shutil.rmtree(plugin_folder_path)
+            logger.info(f"Deleted plugin directory: {plugin_folder_path}")
+            
+            # Clean sys.modules cache to prevent issues if reinstalled in the same session
+            pkg_prefix = f"plugins.{os.path.basename(plugin_folder_path)}"
+            keys_to_delete = [k for k in sys.modules.keys() if k.startswith(pkg_prefix)]
+            for k in keys_to_delete:
+                del sys.modules[k]
+                
+            return True, f"Successfully uninstalled {plugin_id}"
+        except Exception as e:
+            logger.error(f"Failed to uninstall plugin {plugin_id}: {e}", exc_info=True)
+            return False, str(e)
+
     def deactivate_all(self):
         """Deactivates all loaded plugins."""
         for plugin_id, plugin in list(self.plugins.items()):

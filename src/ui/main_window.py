@@ -471,6 +471,19 @@ class MainWindow(QMainWindow):
                     )
                     if reply == QMessageBox.StandardButton.Yes:
                         self.plugin_manager.install_plugin_from_url(url)
+            
+            elif parsed.netloc == "uninstall-plugin":
+                qs = parse_qs(parsed.query)
+                plugin_id = qs.get("id", [""])[0]
+                
+                if plugin_id:
+                    reply = QMessageBox.question(
+                        self, "Uninstall Plugin", 
+                        f"The Web Market is requesting to UNINSTALL the '{plugin_id}' plugin.\n\nDo you want to proceed?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.plugin_manager.uninstall_plugin(plugin_id)
                         
             # Focus window
             self.showNormal()

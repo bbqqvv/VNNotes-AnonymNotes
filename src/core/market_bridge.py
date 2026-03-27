@@ -41,3 +41,16 @@ class MarketBridge(QObject):
     def get_installed_plugins(self):
         """Returns a JSON list of installed plugin IDs."""
         return json.dumps(list(self.plugin_manager.plugins.keys()))
+        
+    @pyqtSlot(str)
+    def uninstall_plugin(self, plugin_id):
+        """Called from JS to uninstall a plugin."""
+        logger.info(f"MarketBridge: Request to uninstall plugin {plugin_id}")
+        success, message = self.plugin_manager.uninstall_plugin(plugin_id)
+        if success:
+            logger.info(f"MarketBridge: Successfully uninstalled {plugin_id}")
+            self.main_window.statusBar().showMessage(f"Successfully uninstalled {plugin_id}!", 3000)
+            self.installation_status.emit(plugin_id, False, "Uninstalled") # False used as 'removed' flag
+        else:
+            logger.error(f"MarketBridge: Failed to uninstall {plugin_id}: {message}")
+            self.main_window.statusBar().showMessage(f"Failed to uninstall {plugin_id}: {message}", 5000)
