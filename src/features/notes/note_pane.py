@@ -1,10 +1,12 @@
 ﻿import logging
 import re
 import os
-from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent, QMimeData, QPoint
+from typing import Dict, Any, cast, Optional
+from PyQt6 import sip
+from PyQt6.QtCore import pyqtSignal, pyqtSlot, Qt, QUrl, QRect, QSize, QTimer, QEvent, QMimeData, QPoint, QMetaObject
 from PyQt6.QtGui import (QFont, QTextListFormat, QTextCursor, QTextBlockFormat, 
                          QPainter, QColor, QFontMetrics, QTextCharFormat, QImage, QDesktopServices, QTextDocument,
-                         QTextTableFormat, QTextFrameFormat, QTextLength, QPalette, QAction, QTextFormat)
+                         QTextTableFormat, QTextFrameFormat, QTextLength, QPalette, QAction, QTextFormat, QTextBlock)
 from PyQt6.QtWidgets import QTextEdit, QWidget, QApplication, QFileDialog, QInputDialog, QFrame
 
 # Component Imports
@@ -107,7 +109,6 @@ class NotePane(QTextEdit):
         self.file_path = None # Tracking the physical file on disk
         self._current_url_highlight: "tuple[int, int] | None" = None 
         self._is_dirty = False # Track if user has modified the content
-        self._is_md_mode = True # Default to Markdown source view
         
         # Managers (Plan v12.3: Reduced page size to 250KB for better performance)
         self.paging_engine = NotePagingEngine(self, page_size=250000)
@@ -140,22 +141,20 @@ class NotePane(QTextEdit):
         
         # Zoom state
         self._zoom_factor = int(zoom) if zoom else 100  # percentage, 100 = default
-        self._base_font_size = 13.0 # Default base size (100% zoom)
-        
-        # Sequential Search State
-        self._current_page_start_line = 0 # 0-indexed
-        
-        # Selection tracking for Ctrl+F (saved before focus leaves)
-        self._last_selection = ""
-        
-        # ALWAYS initialize theme and font on startup
-        # QTimer.singleShot(0, self._sync_initial_theme)
+        self._base_font_size = 12.0 # Default base size (100% zoom)
         
         # Initialize default font to ensure native zoom works (forces pointSize instead of pixelSize)
         doc_font = self.document().defaultFont()
-        if doc_font.pointSize() <= 0:
-             doc_font.setPointSize(12)
+        doc_font.setPointSize(12)
         self.document().setDefaultFont(doc_font)
+        self.setFont(doc_font)
+        
+        # Force apply to ensuring the underlying QTextCharFormat is also updated
+        self.set_font_size(12)
+        
+        # Dev Mode Indentation support
+        font_metrics = QFontMetrics(self.font())
+        self.setTabStopDistance(font_metrics.horizontalAdvance(' ') * 4) # Standard 4-space tab stop
         
         # Emit format info when cursor moves â€” used to sync toolbar widgets
         self.cursorPositionChanged.connect(self._emit_cursor_format)
@@ -223,12 +222,10 @@ class NotePane(QTextEdit):
         
         # Use the editor's native font (which is already zoomed)
         font = self.font()
-        # Make line numbers slightly smaller but strictly allow them to shrink without overlapping
-        # Modified to -1 so line numbers scale up visibly with default text size
-        font.setPointSize(max(1, font.pointSize() - 1))
+        # Match line numbers to editor font size exactly for better readability
         painter.setFont(font)
 
-        block = self.document().begin()
+        block = cast(QTextBlock, self.document().begin())
         current_block = self.textCursor().block().blockNumber()
         
         # We MUST use the document layout to get the true height of rich-text blocks
@@ -258,7 +255,7 @@ class NotePane(QTextEdit):
             if top > event.rect().bottom():
                 break
                 
-            block = block.next()
+            block = cast(QTextBlock, block.next())
 
     def sync_minimap_content(self):
         if not self._show_minimap: return
@@ -360,6 +357,11 @@ class NotePane(QTextEdit):
             
         self.update_sidebars_layout()
         self.highlight_current_line()
+
+    def is_dev_mode(self):
+        """Checks if Dev Mode is currently active."""
+        # We use _show_line_numbers as the internal toggle since toggle_dev_mode sets it
+        return self._show_line_numbers
 
     def highlight_current_line(self):
         """Highlights the active line in Dev Mode, similar to VS Code."""
@@ -584,8 +586,32 @@ class NotePane(QTextEdit):
                 # Intercept the space so it doesn't get inserted AFTER the bullet
                 return
             
+        # 3.5 Dev Mode: Custom Tab and Auto-Indent
+        if self.is_dev_mode():
+            if event.key() == Qt.Key.Key_Tab:
+                # Insert 4 spaces instead of a tab character
+                self.insertPlainText("    ")
                 return
-            
+            elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                # Auto-indent: Copy leading whitespace from current line
+                cursor = self.textCursor()
+                line_text = cursor.block().text()
+                # Find leading whitespace (spaces or tabs)
+                indentation = ""
+                for char in line_text:
+                    if char in (' ', '\t'):
+                        indentation += char
+                    else:
+                        break
+                
+                # Perform the newline
+                super().keyPressEvent(event)
+                
+                # Insert the same indentation on the new line
+                if indentation:
+                    self.insertPlainText(indentation)
+                return
+
         # 4. Plan v12.6: @Mention Trigger & Navigation
         if self.completer.isVisible():
             if self.completer.handle_navigation(event):
@@ -617,6 +643,29 @@ class NotePane(QTextEdit):
             
         super().keyPressEvent(event)
 
+        # Post-typing filter update (Plan v12.6)
+        if self.completer.isVisible():
+             # Extract text after the @ in the current block
+             cursor = self.textCursor()
+             block_text = cursor.block().text()
+             at_idx = block_text.rfind("@")
+             if at_idx != -1:
+                 # Check if the cursor is actually after the @
+                 pos_in_block = cursor.positionInBlock()
+                 if pos_in_block > at_idx:
+                     filter_text = block_text[at_idx+1:pos_in_block].strip()
+                     # Refilter
+                     main_win = self.window()
+                     notes = main_win.note_service.get_notes() if hasattr(main_win, 'note_service') else []
+                     # Re-show with updated filter at same pos
+                     rect = self.cursorRect()
+                     global_pos = self.viewport().mapToGlobal(rect.bottomLeft())
+                     self.completer.show_completions(global_pos, notes, filter_text)
+
+    def insertFromMimeData(self, source: QMimeData):
+        """Standard Rich Text pasting."""
+        super().insertFromMimeData(source)
+
     def createMimeDataFromSelection(self) -> QMimeData:
         """
         Custom MIME data builder for copy operations.
@@ -633,21 +682,6 @@ class NotePane(QTextEdit):
             
         return mime
         
-        # Post-typing filter update
-        if self.completer.isVisible():
-             # Extract text after the @ in the current block
-             cursor = self.textCursor()
-             block_text = cursor.block().text()
-             at_idx = block_text.rfind("@")
-             if at_idx != -1:
-                 filter_text = block_text[at_idx+1:].strip()
-                 # Refilter
-                 main_win = self.window()
-                 notes = main_win.note_service.get_notes() if hasattr(main_win, 'note_service') else []
-                 # Re-show with updated filter at same pos
-                 rect = self.cursorRect()
-                 global_pos = self.viewport().mapToGlobal(rect.bottomLeft())
-                 self.completer.show_completions(global_pos, notes, filter_text)
 
     def _insert_note_link(self, note):
         """Inserts a formatted vnnote:// link for the selected note."""
@@ -729,6 +763,69 @@ class NotePane(QTextEdit):
         """Triggered when the widget is shown. Perfect time for lazy loading."""
         super().showEvent(event)
         self.load_deferred_content()
+    def clean_text_spaces(self):
+        """
+        Cleans redundant spaces and ALL empty lines. 
+        Works in both Source (Markdown) and Formatted (Rich Text) modes.
+        Highly Aggressive: Removes block-level formatting gaps (borders/frames).
+        """
+        logging.info("NotePane: Global Aggressive clean_text_spaces triggered.")
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        
+        doc = self.document()
+        
+        # 1. Clean intra-line spaces
+        b = doc.begin()
+        while b.isValid():
+            text = b.text()
+            # Clean invisible ghosts first
+            text = re.sub(r'[\u200B\uFEFF\u2000-\u200A\u202F\u205F\u3000]', '', text)
+            
+            # In Rich Text, we only strip outer whitespace
+            cleaned = text.strip()
+            
+            if cleaned != b.text():
+                tc = QTextCursor(b)
+                tc.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+                tc.insertText(cleaned)
+            
+            # Reset block format if text is empty to kill "ghost" borders
+            if not cleaned:
+                tc = QTextCursor(b)
+                tc.setBlockFormat(QTextBlockFormat())
+                
+            b = b.next()
+
+        # 2. Aggressive Block Removal (Gaps)
+        tc = QTextCursor(doc)
+        tc.movePosition(QTextCursor.MoveOperation.End)
+        
+        while not tc.atStart():
+            current_block = tc.block()
+            raw_t = current_block.text()
+            clean_t = re.sub(r'[\u200B\uFEFF\u2000-\u200A\u202F\u205F\u3000]', '', raw_t).strip()
+            
+            # In RT mode, even if text is empty, it might be a HR or a placeholder.
+            # We treat any whitespace-only line as a gap to be removed.
+            is_empty = not clean_t
+            
+            if is_empty and doc.blockCount() > 1:
+                tc.select(QTextCursor.SelectionType.BlockUnderCursor)
+                tc.removeSelectedText()
+                tc.deletePreviousChar()
+            else:
+                tc.movePosition(QTextCursor.MoveOperation.PreviousBlock)
+
+        cursor.endEditBlock()
+        self._is_dirty = True
+        self.content_changed.emit()
+        
+        # Feedback
+        main_win = self.window()
+        if hasattr(main_win, 'statusBar') and main_win.statusBar():
+            main_win.statusBar().showMessage("Note Tidied: Non-content gaps purged.", 2000)
+
     def set_html_safe(self, html):
         """Safely sets the document HTML with Paging support."""
         if not html:
@@ -747,35 +844,71 @@ class NotePane(QTextEdit):
         self.paging_engine.set_content(processed)
         self._is_dirty = False
 
-    def convert_markdown_to_rich_text(self):
-        """Toggles between Markdown syntax and formatted Rich Text."""
-        from src.utils.md_utils import markdown_to_html, html_to_markdown
-        
-        if self._is_md_mode:
-            # 1. Switch to Rich Text
-            raw_text = self.toPlainText()
-            if raw_text.strip():
-                html = markdown_to_html(raw_text)
-                self.setHtml(html)
-            self._is_md_mode = False
-            msg = "Markdown -> Rich Text"
+    def get_full_html(self):
+        """
+        Memory-Safe Extraction: Retrieves full HTML regardless of paging state.
+        For paged documents, returns the internal buffer.
+        """
+        if self.paging_engine.is_paged():
+            return self.paging_engine._full_content_html or ""
         else:
-            # 2. Switch back to Markdown source
-            html = self.toHtml()
-            md = html_to_markdown(html)
-            self.setPlainText(md)
-            self._is_md_mode = True
-            msg = "Rich Text -> Markdown"
+            return self.toHtml()
+
+    def get_full_text(self):
+        """
+        Memory-Safe Extraction: Retrieves full content regardless of paging state.
+        For paged documents, strictly uses the paging buffer.
+        """
+        if self.paging_engine.is_paged():
+            # If paged, the buffer IS the source of truth for the full text.
+            # Convert <br> back to \n if it was a text/md file.
+            html = self.paging_engine._full_content_html or ""
+            # Simple reverse of UniversalReader's nl2br
+            text = html.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+            # Strip other HTML tags if it's meant to be plain text
+            import re
+            text = re.sub(r'<[^>]+>', '', text)
+            return text
+        else:
+            return self.toPlainText()
+
+    def convert_markdown_to_rich_text(self):
+        """
+        Robust One-Way Conversion: Renders the current Markdown content into Rich Text.
+        Handles massive documents via PagingEngine and avoids cursor-related crashes.
+        """
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt
+        from src.utils.md_utils import markdown_to_html
         
-        # 3. Apply changes
-        self._is_dirty = True
-        self.content_changed.emit()
-        
-        # 4. Show feedback
-        main_win = self.window()
-        if hasattr(main_win, 'status_bar_manager'):
-            main_win.status_bar_manager.show_message(msg, 2000)
-            main_win.status_bar_manager.update_mode_label(self._is_md_mode)
+        # Show Wait Cursor for feedback
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            # 1. Get full text (Diamond-Standard: Support paged documents)
+            raw_text = self.get_full_text()
+            if not raw_text or not raw_text.strip():
+                return
+                
+            # 2. Render to HTML
+            html = markdown_to_html(raw_text)
+            
+            # 3. Apply Safely (Triggers Paging if result is massive)
+            # Avoid beginEditBlock here because set_html_safe may reset the document/undo stack.
+            self.set_html_safe(html)
+            
+            # 4. Final Polish: We no longer auto-run clean_text_spaces on every render
+            # to prevent UI freeze on large documents. Users can still run it via Format menu.
+            
+            self._is_dirty = True
+            self.content_changed.emit()
+            
+            # 5. Show progress feedback
+            msg = "Markdown Rendered to Rich Text"
+            main_win = self.window()
+            if hasattr(main_win, 'status_bar_manager'):
+                main_win.status_bar_manager.show_message(msg, 2000)
+        finally:
+            QApplication.restoreOverrideCursor()
         
     def highlight_search_result(self, query, line_number=0):
         """
@@ -1109,10 +1242,10 @@ class NotePane(QTextEdit):
                 else:
                     fmt.setFontStrikeOut(False)
                     # Reset to theme-aware default color
-                    reset_color = getattr(self, "_theme_text_color", QColor("black"))
-                    if not self._is_dark_mode and reset_color.lightness() > 200:
+                    reset_color = getattr(self, "_theme_text_color", None) or QColor("black")
+                    if not getattr(self, "_is_dark_mode", True) and reset_color.lightness() > 200:
                         reset_color = QColor("black") # Safety for light theme
-                    elif self._is_dark_mode and reset_color.lightness() < 50:
+                    elif getattr(self, "_is_dark_mode", True) and reset_color.lightness() < 50:
                         reset_color = QColor("white") # Safety for dark theme
                         
                     fmt.setForeground(reset_color)
@@ -1240,15 +1373,15 @@ class NotePane(QTextEdit):
             
             ai_act = QAction(get_icon("ai.svg", is_dark), "Ask AI", self)
             if dock_manager:
-                ai_act.triggered.connect(lambda: dock_manager.add_browser_dock(f"https://www.perplexity.ai/?q={selected_text}"))
+                ai_act.triggered.connect(lambda: cast(Any, dock_manager).add_browser_dock(f"https://www.perplexity.ai/?q={selected_text}"))
 
             search_act = QAction(get_icon("search.svg", is_dark), "Search on Google", self)
             if dock_manager:
-                search_act.triggered.connect(lambda: dock_manager.add_browser_dock(f"https://www.google.com/search?q={selected_text}"))
+                search_act.triggered.connect(lambda: cast(Any, dock_manager).add_browser_dock(f"https://www.google.com/search?q={selected_text}"))
 
             translate_act = QAction(get_icon("browser.svg", is_dark), "Translate to Vietnamese", self)
             if dock_manager:
-                translate_act.triggered.connect(lambda: dock_manager.add_browser_dock(f"https://translate.google.com/?sl=auto&tl=vi&text={selected_text}&op=translate"))
+                translate_act.triggered.connect(lambda: cast(Any, dock_manager).add_browser_dock(f"https://translate.google.com/?sl=auto&tl=vi&text={selected_text}&op=translate"))
 
             # Insert at top
             actions = menu.actions()
@@ -1258,14 +1391,17 @@ class NotePane(QTextEdit):
             menu.insertSeparator(actions[3])
 
         # 8. Dev Mode Toggle (At the very bottom)
-        from PyQt6.QtWidgets import QApplication, QMainWindow
+        from PyQt6.QtWidgets import QApplication
         for w in QApplication.topLevelWidgets():
-            if isinstance(w, QMainWindow) and hasattr(w, 'menu_manager') and "dev_mode" in w.menu_manager.actions:
-                dev_mode_act = w.menu_manager.actions["dev_mode"]
-                dev_mode_act.setIcon(get_icon("code.svg", is_dark)) # Force set icon for context menu
-                menu.addSeparator()
-                menu.addAction(dev_mode_act)
-                break
+            # Check by class name to avoid import cycles or type issues
+            if type(w).__name__ == 'MainWindow' and hasattr(w, 'menu_manager'):
+                actions = getattr(w.menu_manager, 'actions', {})
+                if "dev_mode" in actions:
+                    dev_mode_act = actions["dev_mode"]
+                    dev_mode_act.setIcon(get_icon("code.svg", is_dark))
+                    menu.addSeparator()
+                    menu.addAction(dev_mode_act)
+                    break
 
         menu.exec(event.globalPos())
 
@@ -1345,11 +1481,15 @@ class NotePane(QTextEdit):
             cursor.insertText(" ", normal_fmt)
             cursor.endEditBlock()
         elif fmt_type == "clear":
-            # Reset char format and block format indent
+            # REVOLUTIONARY FIX: Aggressively reset both character and block metadata
+            cursor.beginEditBlock()
+            # 1. Reset selection styling
             cursor.setCharFormat(QTextCharFormat())
-            block_fmt = cursor.blockFormat()
-            block_fmt.setIndent(0)
-            cursor.setBlockFormat(block_fmt)
+            # 2. Reset block formatting (Removes headers, lists, borders, and margins)
+            cursor.setBlockFormat(QTextBlockFormat())
+            # 3. Explicitly kill indent level
+            cursor.endEditBlock()
+            self.setFocus()
         elif fmt_type == "code":
             fmt.setFontFamilies(["Consolas", "Courier New", "Monospace"])
             fmt.setBackground(QColor("#444444"))

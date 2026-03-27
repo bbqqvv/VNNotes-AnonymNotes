@@ -1,0 +1,22 @@
+[
+    {
+        "id": "code_highlighter",
+        "name": "Senior Highlighter",
+        "version": "1.0.0",
+        "author": "VNNotes Team",
+        "description": "Universal syntax highlighting with professional themes.",
+        "download_url": "https://github.com/vtech-digital-solution/VNNotes-Plugins/raw/main/code_highlighter.zip",
+        "category": "Editor",
+        "icon_name": "Code2"
+    },
+    {
+        "id": "hello_world",
+        "name": "Hello World",
+        "version": "0.1.0",
+        "author": "VNNotes",
+        "description": "A simple demo plugin to welcome users.",
+        "download_url": "https://github.com/vtech-digital-solution/VNNotes-Plugins/raw/main/hello_world.zip",
+        "category": "Utilities",
+        "icon_name": "Sparkles"
+    }
+]

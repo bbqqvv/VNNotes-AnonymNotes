@@ -3,11 +3,26 @@ import sys
 
 # os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] removed for stability
 
-# 1. FORCE SOFTWARE RENDERING (DIAMOND-STANDARD FIX FOR WHITE SCREEN)
+# 1. OPTIMIZED RENDERING (RE-ENABLING GPU FOR PERFORMANCE)
 # MUST BE BEFORE ANY QT IMPORTS
-os.environ["QT_OPENGL"] = "software"
+# Relax software rendering to allow Hardware Acceleration
+os.environ["QT_OPENGL"] = "desktop" 
 os.environ["QTWEBENGINE_DISABLE_LOGGING"] = "1"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-gpu-compositing"
+
+# Performance flags for Chromium: Hardware acceleration, rasterization, and threading
+# Performance & Senior-level optimization flags for Chromium
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+    "--ignore-gpu-blocklist "
+    "--enable-gpu-rasterization "
+    "--enable-zero-copy "
+    "--num-raster-threads=4 "
+    "--enable-native-gpu-memory-buffers "
+    "--disable-features=UseSkiaRenderer " # Performance stability on Windows
+    "--enable-accelerated-video-decode "
+    "--disable-reading-from-canvas "      # Privacy + slight speed boost
+    "--disk-cache-size=209715200 "        # 200MB Cache for speed
+    "--process-per-site"                  # Memory saving for multiple tabs
+)
 
 # CRITICAL: Import WebEngine BEFORE QApplication to prevent context crashes
 from PyQt6.QtWebEngineWidgets import QWebEngineView

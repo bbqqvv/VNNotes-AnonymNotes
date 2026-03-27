@@ -18,8 +18,7 @@ def get_icon(name, is_dark=True):
     """Returns a QIcon object for the given icon name and theme."""
     path = os.path.join(get_icon_dir(is_dark), name)
     if not os.path.exists(path):
-        # Fallback to general assets if not in theme folder (optional)
-        path = os.path.join(get_project_root(), "assets", name)
+        path = os.path.join(get_project_root(), "assets", "icons", name)
     
     return QIcon(path)
 

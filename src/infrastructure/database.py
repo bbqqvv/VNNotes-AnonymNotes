@@ -88,6 +88,7 @@ class DatabaseManager:
                 is_locked INTEGER DEFAULT 0,
                 is_placeholder INTEGER DEFAULT 0,
                 password_hash TEXT,
+                position INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -113,6 +114,9 @@ class DatabaseManager:
             if "is_placeholder" not in columns:
                 logging.info("DatabaseManager: Migrating schema - adding 'is_placeholder' to 'notes' table.")
                 cursor.execute("ALTER TABLE notes ADD COLUMN is_placeholder INTEGER DEFAULT 0;")
+            if "position" not in columns:
+                logging.info("DatabaseManager: Migrating schema - adding 'position' to 'notes' table.")
+                cursor.execute("ALTER TABLE notes ADD COLUMN position INTEGER DEFAULT 0;")
 
             # [Relational Alignment] Ensure every note is linked to a Folder entry
             self._run_folder_migration(cursor)

@@ -41,6 +41,7 @@ error_log.txt
 
 # Virtual environment
 venv/
+.venv/
 ENV/
 env/
 .env

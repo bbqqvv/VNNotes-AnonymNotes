@@ -44,6 +44,7 @@ class StorageManager(QObject, IStorage, metaclass=StorageMeta):
             SELECT 
                 n.id, n.obj_name, n.title, n.folder_id, n.pinned, 
                 n.is_open, n.is_locked, n.is_placeholder, n.password_hash, 
+                n.position,
                 n.created_at, n.updated_at,
                 f.name as folder 
             FROM notes n
@@ -58,7 +59,7 @@ class StorageManager(QObject, IStorage, metaclass=StorageMeta):
             if conditions:
                 sql += " WHERE " + " AND ".join(conditions)
             
-            sql += " ORDER BY n.pinned DESC, n.updated_at DESC"
+            sql += " ORDER BY n.pinned DESC, n.position ASC, n.id ASC"
             cursor.execute(sql)
             rows = cursor.fetchall()
             return [Note.from_dict(dict(row)) for row in rows]
@@ -107,16 +108,16 @@ class StorageManager(QObject, IStorage, metaclass=StorageMeta):
             if existing: # Update
                 cursor.execute("""
                     UPDATE notes 
-                    SET title = ?, folder_id = ?, pinned = ?, is_open = ?, is_locked = ?, is_placeholder = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
+                    SET title = ?, folder_id = ?, pinned = ?, is_open = ?, is_locked = ?, is_placeholder = ?, password_hash = ?, position = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE obj_name = ?
                 """, (note.title, folder_id, 1 if note.pinned else 0, 1 if note.is_open else 0, 
-                      1 if note.is_locked else 0, 1 if note.is_placeholder else 0, note.password_hash, note.obj_name))
+                      1 if note.is_locked else 0, 1 if note.is_placeholder else 0, note.password_hash, note.position, note.obj_name))
             else: # Insert
                 cursor.execute("""
-                    INSERT INTO notes (obj_name, title, folder_id, pinned, is_open, is_locked, is_placeholder, password_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO notes (obj_name, title, folder_id, pinned, is_open, is_locked, is_placeholder, password_hash, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (note.obj_name, note.title, folder_id, 1 if note.pinned else 0, 1 if note.is_open else 0, 
-                      1 if note.is_locked else 0, 1 if note.is_placeholder else 0, note.password_hash))
+                      1 if note.is_locked else 0, 1 if note.is_placeholder else 0, note.password_hash, note.position))
             
             cursor.execute("COMMIT;")
             return True

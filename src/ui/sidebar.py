@@ -601,7 +601,9 @@ class SidebarWidget(QWidget):
                     continue
                 obj = dock.objectName()
                 logging.debug(f"[Sidebar]   dock: {obj}")
-                if obj == "SidebarDock" or not obj.startswith("BrowserDock_"):
+                if obj == "SidebarDock":
+                    continue
+                if not obj.startswith("BrowserDock_") and obj != "MarketplaceDock":
                     continue
                 browser_docks.append(dock)
             except RuntimeError: continue

@@ -1,12 +1,14 @@
 ﻿import os
+from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtGui import QIcon, QPalette, QColor
 from PyQt6.QtWidgets import QMainWindow, QDockWidget, QApplication
 
-class ThemeManager:
+class ThemeManager(QObject):
     """
     Manages application theme, stylesheets, and icons.
     Separates UI styling logic from MainWindow.
     """
+    theme_changed = pyqtSignal(bool) # Emits is_dark
     
     THEME_CONFIG = {
         "zinc": {  # Premium Dark
@@ -62,6 +64,7 @@ class ThemeManager:
     }
 
     def __init__(self, main_window, config_manager, base_path):
+        super().__init__()
         self.main_window = main_window
         self.config = config_manager
         self.base_path = base_path
@@ -135,6 +138,9 @@ class ThemeManager:
 
         theme_config = self.THEME_CONFIG.get(self.current_theme, self.THEME_CONFIG["zinc"])
         self._sync_application_palette(theme_config)
+        
+        # Notify listeners
+        self.theme_changed.emit(self.is_dark_mode)
 
 
     def _sync_application_palette(self, c):

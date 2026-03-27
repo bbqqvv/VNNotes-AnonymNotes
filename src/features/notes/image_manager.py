@@ -161,6 +161,9 @@ class NoteImageManager:
 
     def process_html_for_insertion(self, html):
         """Processes HTML by extracting base64 images and adding them as document resources."""
+        if "data:image" not in html:
+            return html
+            
         # Find base64 image tags
         pattern = r'src=["\']data:image/(?P<ext>[^;]+);base64,(?P<data>[^"\']+)["\']'
         index_wrapper = [0] # Use list for closure mutability

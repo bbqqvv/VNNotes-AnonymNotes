@@ -52,7 +52,11 @@ class NoteCompleter(QListWidget):
 
     def _on_item_clicked(self, item):
         note = item.data(Qt.ItemDataRole.UserRole)
-        self.note_selected.emit(note)
+        # Ensure we emit a dict as expected by the signal signature
+        if hasattr(note, 'to_dict'):
+            self.note_selected.emit(note.to_dict())
+        else:
+            self.note_selected.emit(note)
         self.hide()
 
     def handle_navigation(self, event):

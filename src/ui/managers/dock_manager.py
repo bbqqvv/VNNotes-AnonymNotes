@@ -1,18 +1,23 @@
 ﻿from PyQt6.QtWidgets import QDockWidget, QMessageBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6 import sip
+from typing import Dict
 import uuid
 import logging
 
-class DockManager:
+class DockManager(QObject):
     """
     Manages the creation, placement, and lifecycle of dock widgets.
     Handles 'Smart Docking' (Tabification) logic.
     Uses an internal registry for O(1) dock lookups instead of findChildren.
     """
+    dock_added = pyqtSignal()
+    dock_removed = pyqtSignal()
+
     def __init__(self, main_window):
+        super().__init__()
         self.main_window = main_window
-        self._registry = {}  # obj_name -> QDockWidget
+        self._registry: Dict[str, QDockWidget] = {}  # obj_name -> QDockWidget
         self._identity_recursion_guard = False # Fixes AttributeError Crash
 
     def add_note_dock(self, content="", title=None, obj_name=None, anchor_dock=None, file_path=None, zoom=100):
@@ -95,7 +100,7 @@ class DockManager:
             
         return dock
 
-    def add_browser_dock(self, url=None, obj_name=None, anchor_dock=None):
+    def add_browser_dock(self, url=None, obj_name=None, anchor_dock=None, setup_callback=None):
         if not obj_name:
             # Standardize naming to match BrowserService logic
             max_id = 0
@@ -108,7 +113,7 @@ class DockManager:
                 except (ValueError, IndexError, RuntimeError): 
                     # RuntimeError handles "wrapped C/C++ object has been deleted"
                     pass
-            obj_name = f"BrowserDock_{max_id + 1}"
+            obj_name = f"BrowserDock_{int(max_id) + 1}"
 
         # Check if exists (O(1) registry lookup)
         existing_dock = self._registry.get(obj_name)
@@ -130,6 +135,10 @@ class DockManager:
         
         from src.features.browser.browser_pane import BrowserPane
         browser = BrowserPane(url, self.main_window)
+        
+        if setup_callback:
+            setup_callback(browser)
+            
         dock.setWidget(browser)
         
         browser.title_changed.connect(lambda t: self._update_dock_title(dock, t))
@@ -242,18 +251,23 @@ class DockManager:
 
     def _register_dock(self, dock):
         obj_name = dock.objectName()
-        self._registry[obj_name] = dock
         
         if hasattr(self.main_window, 'check_docks_closed'):
             dock.visibilityChanged.connect(lambda _: self.main_window.check_docks_closed())
         
-        # Identity Tagging (Plan v5)
-        self._update_dock_identity(dock)
+        # Register in internal registry for O(1) lookup
+        self._registry[dock.objectName()] = dock
         
-        # Connection for destroyed to cleanup registry, sidebar and MainWindow cache
-        dock.destroyed.connect(lambda obj: self._on_dock_destroyed(obj))
+        # Connect destroyed signal to cleanup registry
+        dock.destroyed.connect(lambda: self._on_dock_destroyed(dock))
+        
+        # Senior Sync: Notify listeners (SidebarTree, etc.)
+        self.dock_added.emit()
         if hasattr(self.main_window, 'on_dock_destroyed'):
             dock.destroyed.connect(self.main_window.on_dock_destroyed)
+        
+        # Identity Tagging (Plan v5)
+        self._update_dock_identity(dock)
         
         # Re-trigger tab bar hook (single-shot timer) when dock layout changes
         if hasattr(self.main_window, 'tab_hook_timer'):
@@ -271,12 +285,8 @@ class DockManager:
             except RuntimeError: pass
 
     def _get_base_title(self, title):
-        """Strips ' (N)' suffix to find the intentional name (Plan v13.6)."""
+        """Returns the intentional title. Suffix stripping disabled in v13.7.1."""
         if not title: return ""
-        import re
-        match = re.search(r" \((\d+)\)$", title)
-        if match:
-            return title[:match.start()].strip()
         return title.strip()
 
     def _update_dock_identity(self, dock, title=None):
@@ -299,75 +309,45 @@ class DockManager:
             widget = dock.widget()
             
             if isinstance(widget, NotePane) and obj_name.startswith("NoteDock_") and hasattr(self.main_window, 'note_service'):
-                # 1. Get Base Identity
+                # 1. Get Base Identity (from DB if possible)
                 note = self.main_window.note_service.get_note_by_id(obj_name)
-                db_title = note.get("title", "Note") if note else (dock.property("vnn_intentional_title") or dock.windowTitle())
-                base_title = self._get_base_title(db_title)
-                folder = note.get("folder", "General") if note else "General"
+                # Intentional title is the actual name from sidebar
+                title_from_db = note.get("title") if note else None
+                intentional_title = title_from_db or dock.property("vnn_intentional_title") or dock.windowTitle()
                 
-                # 2. Group-Wide Update: Find all docks sharing this base title
+                # Store intentional title (clean) for persistence
+                if not dock.property("vnn_intentional_title") or dock.property("vnn_intentional_title") != intentional_title:
+                     dock.setProperty("vnn_intentional_title", intentional_title)
+
+                # 2. Collision Check: Find all open docks sharing this EXACT intentional title
                 all_docks = self.get_all_content_docks()
-                related_group = []
+                collision_group = []
                 for d in all_docks:
                     try:
                         if not sip.isdeleted(d) and d.objectName().startswith("NoteDock_"):
-                            # Get the intentional title of each dock in the group
-                            # We check DB first, then property, then windowTitle
                             d_note = self.main_window.note_service.get_note_by_id(d.objectName())
-                            d_db_title = d_note.get("title", "Note") if d_note else (d.property("vnn_intentional_title") or d.windowTitle())
-                            d_base = self._get_base_title(d_db_title)
-                            
-                            if d_base.lower() == base_title.lower():
-                                related_group.append(d)
+                            d_title = d_note.get("title") if d_note else (d.property("vnn_intentional_title") or d.windowTitle())
+                            if d_title == intentional_title:
+                                collision_group.append(d)
                     except (RuntimeError, AttributeError): continue
 
-                # 3. Sort by Visual Index (Natural Sort fallback)
-                def get_sort_key(d):
-                    # Try to get visual index from TabManager for left-to-right numbering
-                    visual_idx = 9999
-                    if hasattr(self.main_window, 'tab_manager'):
-                        from PyQt6.QtWidgets import QTabBar
-                        tabbars = self.main_window.findChildren(QTabBar)
-                        for tb in tabbars:
-                            if not sip.isdeleted(tb):
-                                for i in range(tb.count()):
-                                    # Cross-call to TabManager to find which dock is at which tab
-                                    if self.main_window.tab_manager._get_dock_at_index(tb, i) == d:
-                                        visual_idx = i
-                                        break
-                            if visual_idx != 9999: break
-                    
-                    opening_order = 0
-                    try:
-                        opening_order = int(d.objectName().split("_")[1])
-                    except Exception: pass
-                    
-                    return (visual_idx, opening_order)
-                
-                related_group.sort(key=get_sort_key)
-                
-                has_collision = len(related_group) > 1
+                # 3. Disambiguate the group
+                if len(collision_group) <= 1:
+                    # Unique: Restore original name
+                    if dock.windowTitle() != intentional_title:
+                        dock.setWindowTitle(intentional_title)
+                    dock.setToolTip(intentional_title)
+                    return
 
-                # 4. Update EVERY dock in the group to ensure consistency
-                for idx, group_dock in enumerate(related_group):
-                    g_note = self.main_window.note_service.get_note_by_id(group_dock.objectName())
-                    g_db_title = g_note.get("title", "Note") if g_note else (group_dock.property("vnn_intentional_title") or group_dock.windowTitle())
-                    g_base = self._get_base_title(g_db_title)
-                    
-                    # Store intentional title (clean) for persistence
-                    if not group_dock.property("vnn_intentional_title"):
-                         group_dock.setProperty("vnn_intentional_title", g_db_title)
-
-                    target_title = g_db_title
-                    if has_collision:
-                        # Follow opening order: (1), (2), (3)...
-                        target_title = f"{g_base} ({idx + 1})"
-                    
-                    if group_dock.windowTitle() != target_title:
-                        group_dock.setWindowTitle(target_title)
-                    
-                    # Simplified Tooltip for the group
-                    group_dock.setToolTip(target_title)
+                # Multiple notes with SAME title (Likely in different folders)
+                for d in collision_group:
+                    d_note = self.main_window.note_service.get_note_by_id(d.objectName())
+                    folder = d_note.get("folder", "General") if d_note else "General"
+                    # Format: Title [Folder]
+                    new_title = f"{intentional_title} [{folder}]"
+                    if d.windowTitle() != new_title:
+                        d.setWindowTitle(new_title)
+                    d.setToolTip(new_title)
                 return
 
             # Default fallback for browsers or non-note docks

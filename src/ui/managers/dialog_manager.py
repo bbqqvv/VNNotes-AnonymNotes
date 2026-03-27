@@ -67,13 +67,11 @@ class DialogManager:
         try:
             ext = os.path.splitext(path)[1].lower()
             if ext == ".html":
-                content = pane.toHtml()
-            elif ext == ".md" or ext == ".txt":
-                # Use plain text for these formats
-                content = pane.toPlainText()
+                # Diamond-Standard: use the pane's safe full-getter
+                content = getattr(pane, 'get_full_html', pane.toHtml)()
             else:
-                # Default to plain text
-                content = pane.toPlainText()
+                # Diamond-Standard: use the pane's safe full-getter
+                content = getattr(pane, 'get_full_text', pane.toPlainText)()
                 
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)

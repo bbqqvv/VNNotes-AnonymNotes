@@ -15,6 +15,7 @@ class Note:
     password_hash: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    position: int = 0
     tags: List[str] = field(default_factory=list)
     content: Optional[str] = None
 
@@ -33,13 +34,14 @@ class Note:
         if not data: return None
         return cls(
             obj_name=data.get("obj_name"),
-            title=data.get("title"),
+            title=data.get("title") or "",
             folder=data.get("folder", "General"),
             pinned=bool(data.get("pinned", 0)),
             is_open=bool(data.get("is_open", 1)),
             is_locked=bool(data.get("is_locked", 0)),
             is_placeholder=bool(data.get("is_placeholder", 0)),
             password_hash=data.get("password_hash"),
+            position=int(data.get("position", 0)),
             content=data.get("content")
         )
 
@@ -53,7 +55,8 @@ class Note:
             "is_open": 1 if self.is_open else 0,
             "is_locked": 1 if self.is_locked else 0,
             "is_placeholder": 1 if self.is_placeholder else 0,
-            "password_hash": self.password_hash
+            "password_hash": self.password_hash,
+            "position": self.position
         }
 
 @dataclass

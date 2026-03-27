@@ -42,18 +42,26 @@ class NoteService:
         """Returns all notes currently pinned."""
         return [n for n in self._notes if n.pinned]
 
-    def add_note(self, title="New Note", content="", folder="General", pinned=False, is_open=True, is_placeholder=False) -> Note:
+    def add_note(self, title="New Note", content="", folder="General", pinned=False, is_open=True, is_placeholder=False, is_locked=False) -> Note:
         """Adds a new note entity via the model layer."""
         title = self._get_unique_title(title, folder)
         
-        # Find max ID for local naming
+        # Find max ID for local naming and max position
         max_id = 0
+        max_pos = 0
         for note in self._notes:
-             if note.obj_name.startswith("NoteDock_"):
+             # Support both Note objects and legacy dicts if any remain during migration
+             o_name = note.obj_name if hasattr(note, 'obj_name') else note.get("obj_name", "")
+             pos = note.position if hasattr(note, 'position') else note.get("position", 0)
+             
+             if isinstance(o_name, str) and o_name.startswith("NoteDock_"):
                  try:
-                     nid = int(note.obj_name.split("_")[1])
+                     nid = int(o_name.split("_")[1])
                      if nid > max_id: max_id = nid
-                 except ValueError: pass
+                 except (ValueError, IndexError): pass
+             
+             if pos > max_pos:
+                 max_pos = pos
                        
         new_id = max_id + 1
         new_note = Note(
@@ -62,7 +70,9 @@ class NoteService:
             folder=folder,
             pinned=pinned,
             is_open=is_open,
-            is_placeholder=is_placeholder
+            is_locked=is_locked,
+            is_placeholder=is_placeholder,
+            position=max_pos + 1
         )
         
         # Persistent storage
@@ -78,8 +88,8 @@ class NoteService:
         """Ensures title is unique within a folder (Enterprise logic)."""
         target_folder = folder_name.strip() if folder_name else "General"
         existing_titles = [
-            n.title.lower().strip() for n in self._notes 
-            if n.folder.strip() == target_folder 
+            (n.title or "").lower().strip() for n in self._notes 
+            if (n.folder or "").strip() == target_folder 
             and n.obj_name != exclude_obj_name
             and not n.is_placeholder
         ]

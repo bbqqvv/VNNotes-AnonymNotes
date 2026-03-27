@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QFrame
 )
 from PyQt6.QtGui import QAction, QFont, QIcon, QDesktopServices, QTextCursor, QColor, QPixmap, QPainter, QShortcut, QKeySequence
-from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, QMetaObject, Q_ARG, QByteArray, QPoint, QEvent
+from PyQt6.QtCore import Qt, QUrl, QSize, QTimer, pyqtSlot, pyqtSignal, QMetaObject, Q_ARG, QByteArray, QPoint, QEvent
 from PyQt6 import QtCore, sip
 
 logger = logging.getLogger(__name__)
@@ -46,10 +46,16 @@ from src.ui.sidebar import SidebarWidget
 from src.ui.managers.theme_manager import ThemeManager
 from src.ui.quick_switcher import QuickSwitcher
 from src.ui.password_dialog import PasswordDialog
+from src.features.stt.stt_manager import STTManager
+from src.core.plugins import PluginManager
+from src.core.market_bridge import MarketBridge
 
 class MainWindow(QMainWindow):
     # Plan v6: Layout Limits (User requested 8-10 capacity)
     MAX_SPLIT_NOTES = 10
+    
+    # Plugin Signals
+    note_dock_created = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -115,6 +121,12 @@ class MainWindow(QMainWindow):
         self.visibility_manager = VisibilityManager(self)
         self.tab_manager = TabManager(self)
         self.dialog_manager = DialogManager(self)
+        self.stt_manager = STTManager(self)
+        self.plugin_manager = PluginManager(self.ctx, self)
+        
+        # Connect STT
+        self.stt_manager.transcription_received.connect(self._on_stt_transcription)
+        self.stt_manager.state_changed.connect(self._on_stt_state_changed)
         
         # Shortcuts to services from context
         self.note_service = self.ctx.notes
@@ -129,11 +141,22 @@ class MainWindow(QMainWindow):
         # Final Setup
         self.setup_status_bar_widgets()
         
+        # Senior Sync: Automatically refresh sidebar tree when docks are added/removed
+        if hasattr(self, 'sidebar') and self.sidebar:
+            self.dock_manager.dock_added.connect(self.sidebar.refresh_tree)
+            self.dock_manager.dock_removed.connect(self.sidebar.refresh_tree)
+        
+        # Initialize Market Bridge
+        self.market_bridge = MarketBridge(self.plugin_manager, self)
+        
         # Hook tab bars after dock changes (single-shot, re-triggered by dock_manager)
         self.tab_hook_timer = QTimer(self)
         self.tab_hook_timer.setSingleShot(True)
         self.tab_hook_timer.timeout.connect(self.hook_tab_bars)
         self.tab_hook_timer.start(800)  # Reduced from 5000ms for faster UI response
+        
+        # Load Plugins (after UI is ready)
+        QTimer.singleShot(1000, self.plugin_manager.load_plugins)
         
         # Plan v15.5: Global Shortcut Interceptor (ShortcutOverride)
         # This is CRITICAL to prevent Ctrl+Tab from being swallowed by child widgets or OS.
@@ -462,6 +485,8 @@ class MainWindow(QMainWindow):
             self.toggle_visibility()
 
     def quit_app(self):
+        if hasattr(self, 'plugin_manager'):
+            self.plugin_manager.deactivate_all()
         self.save_app_state()
         QApplication.quit()
 
@@ -570,7 +595,6 @@ class MainWindow(QMainWindow):
                                  # Lock FIRST
                                  self.sidebar_dock.setFixedWidth(int(target_w))
                                  
-                                 from PyQt6.QtCore import QTimer
                                  def release_lock():
                                      if not sip.isdeleted(self) and self.sidebar_dock and not sip.isdeleted(self.sidebar_dock):
                                          self.sidebar_dock.setMinimumWidth(80)
@@ -591,9 +615,17 @@ class MainWindow(QMainWindow):
             
             # Physical enforcement: The sidebar CANNOT grow beyond its saved width when empty.
             if self.sidebar_dock:
-                self.sidebar_dock.setMaximumWidth(int(target_w))
-                # Ensure it actually occupies that space
-                self.resizeDocks([self.sidebar_dock], [int(target_w)], Qt.Orientation.Horizontal)
+                # Plan v8.12: Hard snap to stable width but MAINTAIN resizability
+                target_w_int = int(target_w)
+                self.sidebar_dock.setFixedWidth(target_w_int)
+                self.resizeDocks([self.sidebar_dock], [target_w_int], Qt.Orientation.Horizontal)
+                
+                # Release constraints after layout settles
+                def release_sidebar_lock():
+                    if not sip.isdeleted(self) and self.sidebar_dock and not sip.isdeleted(self.sidebar_dock):
+                        self.sidebar_dock.setMinimumWidth(80)
+                        self.sidebar_dock.setMaximumWidth(600)
+                QTimer.singleShot(200, release_sidebar_lock)
 
             # Plan v8.11: Restore logo visibility when returning to empty state
             if hasattr(self, 'branding') and self.branding:
@@ -674,6 +706,9 @@ class MainWindow(QMainWindow):
             finally:
                 self._is_internal_refresh = False
             
+        # Emit signal for plugins (Syntax Highlighter, etc)
+        self.note_dock_created.emit(dock)
+            
         return dock
 
     def add_browser_dock(self, url=None, anchor_dock=None, obj_name=None):
@@ -685,6 +720,32 @@ class MainWindow(QMainWindow):
             
         dock = self.dock_manager.add_browser_dock(url, anchor_dock=anchor_dock, obj_name=obj_name)
         
+        return dock
+
+    def add_market_dock(self):
+        """Opens the Plugin Marketplace using the standard browser life-cycle."""
+        market_url = "http://vnnotes.vanquocbui.id.vn/market"
+        
+        def setup_market(browser_pane):
+            """Custom setup for Marketplace Integrated feel."""
+            from PyQt6.QtWebChannel import QWebChannel
+            browser_pane.url_bar.hide()
+            browser_pane.toolbar_container.hide()
+            
+            # Setup QWebChannel for the Marketplace Bridge
+            channel = QWebChannel(browser_pane.browser.page())
+            channel.registerObject("vnnotes_market", self.market_bridge)
+            browser_pane.browser.page().setWebChannel(channel)
+        
+        # Open via standard dock manager (ensures sidebar / branding logic)
+        dock = self.dock_manager.add_browser_dock(
+            url=market_url, 
+            obj_name="MarketplaceDock", 
+            setup_callback=setup_market
+        )
+        
+        # Ensure it has the correct title
+        dock.setWindowTitle("Plugin Marketplace")
         return dock
 
 
@@ -792,14 +853,60 @@ class MainWindow(QMainWindow):
         if self.active_pane:
             self.active_pane.apply_format(fmt_type)
 
+    def clean_spaces(self):
+        if self.active_pane and hasattr(self.active_pane, 'clean_text_spaces'):
+            self.active_pane.clean_text_spaces()
+
     def apply_font_size(self, size: int):
         if self.active_pane:
             self.active_pane.set_font_size(size)
+
+    # --- Speech to Text ---
+    def _on_stt_transcription(self, text):
+        """Inserts final transcribed text into the active pane."""
+        if self.active_pane:
+            self.active_pane.insertPlainText(text + " ")
+            self.statusBar().showMessage(f"Recognized: {text[:30]}...", 2000)
+
+    def _on_stt_state_changed(self, state):
+        """Updates UI based on STT engine state."""
+        logging.info(f"STT State: {state}")
+        if hasattr(self, 'menu_manager'):
+            self.menu_manager.update_stt_icon(state)
+        
+        if "error" in state.lower():
+            self.statusBar().showMessage(f"STT Error: {state}", 5000)
+
+    def toggle_stt(self):
+        """Toggles voice recording."""
+        if hasattr(self, 'stt_manager'):
+            self.stt_manager.toggle()
 
     def convert_markdown(self):
         """Triggers MD-to-RichText conversion on the active pane."""
         if self.active_pane and hasattr(self.active_pane, "convert_markdown_to_rich_text"):
             self.active_pane.convert_markdown_to_rich_text()
+
+    def import_plugin(self):
+        """Opens a file dialog to select a plugin ZIP and installs it."""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Plugin", "", "VNNotes Plugin Archive (*.zip)"
+        )
+        
+        if not file_path:
+            return
+            
+        success, message = self.plugin_manager.install_plugin(file_path)
+        
+        if success:
+            QMessageBox.information(self, "Plugin Installed", message)
+            # Re-sync icons in case the plugin added actions (optional but good)
+            if hasattr(self, 'menu_manager'):
+                self.menu_manager.update_icons()
+        else:
+            QMessageBox.warning(self, "Installation Failed", message)
 
     def pick_text_color(self):
         from PyQt6.QtWidgets import QColorDialog
@@ -904,19 +1011,13 @@ class MainWindow(QMainWindow):
                     break
         
         if isinstance(pane, NotePane) and dock:
-             # Performance optimization: extract only the first block/line without full text copy
-             doc = pane.document()
-             first_block = doc.begin()
-             first_line = first_block.text().strip()[:30] if first_block.isValid() else ""
+             # Plan v13.7: Prefer intentional title (clean) over windowTitle (disambiguated)
+             intentional_title = dock.property("vnn_intentional_title") or dock.windowTitle() or "Untitled"
              
-             if not first_line:
-                 # Plan v13.7: Prefer intentional title (clean) over windowTitle (disambiguated)
-                 first_line = dock.property("vnn_intentional_title") or dock.windowTitle() or "Untitled"
-             
-             if dock.windowTitle() != first_line:
-                 dock.setWindowTitle(first_line)
+             if dock.windowTitle() != intentional_title:
+                 dock.setWindowTitle(intentional_title)
                  if self.sidebar:
-                     self.sidebar.update_note_title(pane.objectName(), first_line)
+                     self.sidebar.update_note_title(pane.objectName(), intentional_title)
 
     def _do_on_content_changed(self):
         """DEBOUNCED WORKER: Triggers heavy auto-save after longer typing pauses."""
@@ -1095,6 +1196,20 @@ class MainWindow(QMainWindow):
     def eventFilter(self, obj, event):
         """Global Application Event Filter."""
         try:
+            # STT PTT (Push-to-Talk) Logic: Ctrl+Alt+V
+            if event.type() == QEvent.Type.KeyPress or event.type() == QEvent.Type.KeyRelease:
+                if event.key() == Qt.Key.Key_V and (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+                    if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+                        # Start recording
+                        if hasattr(self, 'stt_manager'):
+                            self.stt_manager.start()
+                        return True
+                    elif event.type() == QEvent.Type.KeyRelease and not event.isAutoRepeat():
+                        # Stop and process
+                        if hasattr(self, 'stt_manager'):
+                            self.stt_manager.stop()
+                        return True
+
             if self.find_manager.handle_key_event(obj, event):
                 return True
             return super().eventFilter(obj, event)

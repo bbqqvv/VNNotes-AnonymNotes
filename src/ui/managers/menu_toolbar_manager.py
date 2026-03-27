@@ -1,6 +1,8 @@
-﻿from PyQt6.QtWidgets import QToolBar, QMenu, QLabel, QWidget, QSizePolicy, QSlider, QComboBox, QPushButton, QHBoxLayout, QToolButton
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QAction
+﻿from PyQt6.QtWidgets import (QMainWindow, QMenu, QMenuBar, QToolBar, QStatusBar,
+                             QApplication, QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QSizePolicy, QSlider, QComboBox, QPushButton, QHBoxLayout, QToolButton)
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QObject
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QColor
+from typing import Dict, Optional, Any, cast
 import os
 import sys
 import logging
@@ -12,13 +14,15 @@ class MenuToolbarManager:
     """
     def __init__(self, main_window):
         self.main_window = main_window
-        self.actions = {} # Store actions by name
-        self.font_size_combo = None
-        self.text_color_btn = None
-        self.highlight_color_btn = None
-        self.label_ghost = None
-        self.opacity_label = None # To display percentage
-        self.opacity_slider = None
+        self.actions: Dict[str, QAction] = {} # Store actions by name
+        self.font_size_combo: Optional[QComboBox] = None
+        self.text_color_btn: Optional[QToolButton] = None
+        self.highlight_color_btn: Optional[QToolButton] = None
+        self._current_text_color: QColor = QColor("black")
+        self._current_highlight_color: QColor = QColor("yellow")
+        self.label_ghost: Optional[QLabel] = None
+        self.opacity_label: Optional[QLabel] = None # To display percentage
+        self.opacity_slider: Optional[QSlider] = None
         
     def setup_actions(self):
         """Creates all QActions and stores them."""
@@ -58,6 +62,8 @@ class MenuToolbarManager:
                           lambda: self.main_window.apply_format("list"))
         self.create_action("check", "Task", "Checkbox / Todo (Ctrl+Shift+C)", "Ctrl+Shift+C",
                           lambda: self.main_window.apply_format("checkbox"))
+        self.create_action("md", "Render Markdown", "Convert Markdown syntax to formatted Rich Text (Ctrl+Alt+M)", "Ctrl+Alt+M",
+                          self.main_window.convert_markdown, icon="code.svg")
         self.create_action("code", "Code", "Code Block (Ctrl+Shift+K)", "Ctrl+Shift+K",
                           lambda: self.main_window.apply_format("code"))
         self.create_action("highlight", "Highlight", "Highlight Text (Ctrl+H)", "Ctrl+H",
@@ -85,6 +91,9 @@ class MenuToolbarManager:
         self.create_action("search", "Find", "Find in Note (Ctrl+F)", "Ctrl+F",
                           self.main_window.show_find_dialog)
         
+        self.create_action("clean_spaces", "Clean Spaces", "Remove redundant spaces and empty lines", "Ctrl+Alt+K",
+                          self.main_window.clean_spaces, icon="refresh.svg")
+        
         self.create_action("quick_switcher", "Quick Switcher", "Jump to any note (Ctrl+P)", "Ctrl+P",
                           self.main_window.show_quick_switcher, icon="search.svg")
         
@@ -92,6 +101,9 @@ class MenuToolbarManager:
         self.create_action("restore_grid", "Safe Grid Reset", "Tidy layout into Grid/Tabs (Respects tab stacks) (Ctrl+Alt+G)", "Ctrl+Alt+G",
                           self.main_window.restore_grid_layout, icon="table.svg")
 
+        self.create_action("mic", "Voice Dictation", "Toggle Speech-to-Text (Ctrl+Alt+V)", "Ctrl+Alt+V",
+                          self.main_window.toggle_stt, icon="mic.svg")
+        
         self.create_action("close_tab", "Close Tab", "Close Active Tab (Ctrl+W)", "Ctrl+W",
                           self.main_window.close_active_tab)
         self.create_action("close_all", "Close All Notes", "Close every open tab in the app", None,
@@ -153,6 +165,12 @@ class MenuToolbarManager:
         about_act._icon_name = "note.svg"
         about_act.triggered.connect(self.main_window.show_about_dialog)
         self.actions["about"] = about_act
+
+        self.create_action("import_plugin", "Import Plugin...", "Install a plugin from a ZIP file", None,
+                          self.main_window.import_plugin, icon="note-add.svg")
+                          
+        self.create_action("market", "Plugin Market", "Browse and install plugins (Ctrl+Shift+M)", "Ctrl+Shift+M",
+                          self.main_window.add_market_dock, icon="market.svg")
 
         # Auto-Save
         autosave_act = QAction("Auto-Save", self.main_window)
@@ -218,6 +236,8 @@ class MenuToolbarManager:
         # Add Split Layout actions to toolbar for easy mouse access
         toolbar.addSeparator()
         toolbar.addAction(self.actions["restore_grid"])
+        # toolbar.addAction(self.actions["market"]) # Moved to Help menu per user request
+        toolbar.addAction(self.actions["mic"])
 
         # Spacer Left
         spacer_left = QWidget()
@@ -226,39 +246,43 @@ class MenuToolbarManager:
 
         # â”€â”€ Font Size Combo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self.font_size_combo = QComboBox()
-        self.font_size_combo.setEditable(True)
-        self.font_size_combo.setFixedSize(56, 24)
-        self.font_size_combo.setToolTip("Font Size")
+        combo = cast(QComboBox, self.font_size_combo)
+        combo.setEditable(True)
+        combo.setFixedSize(56, 24)
+        combo.setToolTip("Font Size")
         sizes = ["8","9","10","11","12","13","14","16","18","20","24","28","32","36","48","72"]
-        self.font_size_combo.addItems(sizes)
-        self.font_size_combo.setCurrentText("13")
+        combo.addItems(sizes)
+        combo.setCurrentText("13")
         # Only apply when user SELECTS from dropdown or presses ENTER (not each keystroke)
-        self.font_size_combo.activated.connect(
-            lambda idx: self._on_font_size_changed(self.font_size_combo.currentText())
+        combo.activated.connect(
+            lambda idx: self._on_font_size_changed(combo.currentText())
         )
-        self.font_size_combo.lineEdit().returnPressed.connect(
-            lambda: self._on_font_size_changed(self.font_size_combo.currentText())
+        combo.lineEdit().returnPressed.connect(
+            lambda: self._on_font_size_changed(combo.currentText())
         )
         toolbar.addWidget(self.font_size_combo)
 
         # â”€â”€ Text Color Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        from PyQt6.QtGui import QColor as _QC, QPixmap as _QP, QPainter as _QPn, QFont as _QFo
         self.text_color_btn = QToolButton()
-        self.text_color_btn.setAutoRaise(True)
-        self.text_color_btn.setToolTip("Text Color")
-        self.text_color_btn._letter = "A"
-        self._draw_color_icon(self.text_color_btn, _QC("black"))
-        self.text_color_btn.clicked.connect(self.main_window.pick_text_color)
-        toolbar.addWidget(self.text_color_btn)
+        t_btn = cast(QToolButton, self.text_color_btn)
+        t_btn.setAutoRaise(True)
+        t_btn.setToolTip("Text Color")
+        t_btn._letter = "A" # type: ignore
+        t_btn._base_tip = "Text Color" # type: ignore
+        self._draw_color_icon(t_btn, self._current_text_color)
+        t_btn.clicked.connect(self.main_window.pick_text_color)
+        toolbar.addWidget(t_btn)
 
         # â”€â”€ Highlight Color Button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         self.highlight_color_btn = QToolButton()
-        self.highlight_color_btn.setAutoRaise(True)
-        self.highlight_color_btn.setToolTip("Highlight Color")
-        self.highlight_color_btn._letter = "H"
-        self._draw_color_icon(self.highlight_color_btn, _QC("yellow"))
-        self.highlight_color_btn.clicked.connect(self.main_window.pick_highlight_color)
-        toolbar.addWidget(self.highlight_color_btn)
+        h_btn = cast(QToolButton, self.highlight_color_btn)
+        h_btn.setAutoRaise(True)
+        h_btn.setToolTip("Highlight Color")
+        h_btn._letter = "H" # type: ignore
+        h_btn._base_tip = "Highlight Color" # type: ignore
+        self._draw_color_icon(h_btn, self._current_highlight_color)
+        h_btn.clicked.connect(self.main_window.pick_highlight_color)
+        toolbar.addWidget(h_btn)
 
         # Alignment Group (Next to Formatting)
         toolbar.addAction(self.actions["align-left"])
@@ -289,19 +313,21 @@ class MenuToolbarManager:
 
         # 2. Opacity Cluster
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(10, 100)
-        self.opacity_slider.setValue(100)
-        self.opacity_slider.setFixedWidth(40) 
-        self.opacity_slider.setToolTip("Window Opacity (Ctrl+Shift+G for Ghost Mode)")
-        self.opacity_slider.valueChanged.connect(self.main_window.change_window_opacity)
-        right_layout.addWidget(self.opacity_slider)
-        
+        o_slider = cast(QSlider, self.opacity_slider)
+        o_slider.setRange(10, 100)
+        o_slider.setValue(100)
+        o_slider.setFixedWidth(40) 
+        o_slider.setToolTip("Window Opacity (Ctrl+Shift+G for Ghost Mode)")
+        o_slider.valueChanged.connect(self.main_window.change_window_opacity)
+        right_layout.addWidget(o_slider)
+
         self.opacity_label = QLabel("100%")
-        self.opacity_label.setFixedWidth(30)
-        self.opacity_label.setToolTip("Current Opacity %")
-        self.opacity_label.setStyleSheet("font-size: 9px; color: gray;")
-        self.opacity_slider.valueChanged.connect(lambda v: self.opacity_label.setText(f"{v}%"))
-        right_layout.addWidget(self.opacity_label)
+        o_label = cast(QLabel, self.opacity_label)
+        o_label.setFixedWidth(30)
+        o_label.setToolTip("Current Opacity %")
+        o_label.setStyleSheet("color: #858585; font-size: 10px;")
+        o_slider.valueChanged.connect(lambda v: o_label.setText(f"{v}%"))
+        right_layout.addWidget(o_label)
         
         # 3. Ghost Icon
         ghost_icon_label = QLabel()
@@ -383,12 +409,14 @@ class MenuToolbarManager:
         format_menu.addAction(self.actions["bold"])
         format_menu.addAction(self.actions["italic"])
         format_menu.addAction(self.actions["underline"])
+        format_menu.addAction(self.actions["md"])
         format_menu.addSeparator()
         format_menu.addAction(self.actions["list"])
         format_menu.addAction(self.actions["check"])
         format_menu.addAction(self.actions["code"])
         format_menu.addAction(self.actions["highlight"])
         format_menu.addAction(self.actions["clear"])
+        format_menu.addAction(self.actions["clean_spaces"])
         format_menu.addSeparator()
         format_menu.addAction(self.actions["indent"])
         format_menu.addAction(self.actions["outdent"])
@@ -403,21 +431,25 @@ class MenuToolbarManager:
         
         # Tools
         tools_menu = menubar.addMenu("Tools")
+        tools_menu.addAction(self.actions["mic"])
         tools_menu.addAction(self.actions["prompter"])
         tools_menu.addAction(self.actions["clipboard"])
+        tools_menu.addSeparator()
+        tools_menu.addAction(self.actions["import_plugin"])
         
         # Help
         help_menu = menubar.addMenu("Help")
         help_menu.addAction(self.actions["about"])
         help_menu.addSeparator()
         help_menu.addAction(self.actions["update"])
+        help_menu.addSeparator()
+        help_menu.addAction(self.actions["market"])
         
     def _icon(self, filename):
         return self.main_window.theme_manager.get_icon(filename)
 
     def update_icons(self):
         # Update all actions
-        from PyQt6.QtGui import QAction, QColor
         for key, action in self.actions.items():
             if isinstance(action, QAction):
                 icon_name = getattr(action, "_icon_name", f"{key}.svg")
@@ -518,3 +550,27 @@ class MenuToolbarManager:
         else:
             base_tip = getattr(btn, '_base_tip', btn.toolTip().split(" (")[0])
             btn.setToolTip(base_tip)
+
+    def update_stt_icon(self, state):
+        """Updates the microphone icon color/animation based on state."""
+        from PyQt6.QtGui import QColor, QPainter, QPixmap, QIcon
+        from PyQt6.QtCore import Qt
+        
+        action = self.actions.get("mic")
+        if not action: return
+
+        if state == "recording":
+            # Red "Recording" icon
+            icon = self._icon("mic.svg")
+            pixmap = icon.pixmap(24, 24)
+            painter = QPainter(pixmap)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            painter.fillRect(pixmap.rect(), QColor("#ef4444")) # Bright Red
+            painter.end()
+            action.setIcon(QIcon(pixmap))
+            action.setText("Recording...")
+        else:
+            # Standard themed icon
+            icon_name = getattr(action, "_icon_name", "mic.svg")
+            action.setIcon(self._icon(icon_name))
+            action.setText("Voice Dictation")

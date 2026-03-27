@@ -1,0 +1,134 @@
+name: Build & Release VNNotes
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Setup Python (no cache – always latest deps) ────────
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          # No cache: ensures latest versions are always installed
+
+      # ── 3. Install dependencies (always fresh, no cache) ───────
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir pyinstaller
+
+      # ── 4. Extract version from tag ────────────────────────────
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      # ── 5. Build with PyInstaller ──────────────────────────────
+      - name: Build application with PyInstaller
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --onedir `
+            --windowed `
+            --name VNNotes `
+            --icon appnote.ico `
+            --add-data "assets;assets" `
+            --add-data "appnote.png;." `
+            --add-data "logo.png;." `
+            --clean `
+            main.py
+
+      # ── 6. Optimize build (remove bloat) ───────────────────────
+      - name: Optimize build artifacts
+        shell: pwsh
+        run: |
+          $distDir = "dist/VNNotes"
+          
+          # Remove debug paks and unnecessary files
+          $toRemove = @(
+            "_internal/PyQt6/Qt6/resources/qtwebengine_devtools_resources.debug.pak",
+            "_internal/PyQt6/Qt6/resources/qtwebengine_resources.debug.pak",
+            "_internal/PyQt6/Qt6/resources/qtwebengine_resources_100p.debug.pak",
+            "_internal/PyQt6/Qt6/resources/qtwebengine_resources_200p.debug.pak",
+            "_internal/PyQt6/Qt6/resources/v8_context_snapshot.debug.bin",
+            "PyQt6/Qt6/resources/qtwebengine_devtools_resources.debug.pak",
+            "PyQt6/Qt6/resources/qtwebengine_resources.debug.pak",
+            "debug.log"
+          )
+          
+          foreach ($item in $toRemove) {
+            $path = Join-Path $distDir $item
+            if (Test-Path $path) {
+              Remove-Item $path -Force
+              Write-Host "[Removed] $item"
+            }
+          }
+          
+          # Prune locales (keep only en-US)
+          $localePaths = @(
+            "$distDir/_internal/PyQt6/Qt6/translations/qtwebengine_locales",
+            "$distDir/PyQt6/Qt6/translations/qtwebengine_locales"
+          )
+          foreach ($localeDir in $localePaths) {
+            if (Test-Path $localeDir) {
+              Get-ChildItem $localeDir -File | Where-Object { $_.Name -notlike "en-*" } | Remove-Item -Force
+              Write-Host "[Pruned] Locales in $localeDir"
+            }
+          }
+
+      # ── 7. Install Inno Setup ──────────────────────────────────
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+
+      # ── 8. Build Windows Installer (.exe) ──────────────────────
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        run: |
+          $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $isccPath)) {
+            Write-Error "ISCC.exe not found at expected path"
+            exit 1
+          }
+          & $isccPath /DMyAppVersion="${{ steps.version.outputs.VERSION }}" tools/vnnotes_installer.iss
+          Write-Host "[Success] Installer built"
+
+      # ── 9. Create portable ZIP ─────────────────────────────────
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $zipName = "VNNotes-v${{ steps.version.outputs.VERSION }}-windows-portable.zip"
+          Compress-Archive -Path "dist/VNNotes/*" -DestinationPath "dist/$zipName"
+          Write-Host "[Success] Created $zipName"
+
+      # ── 10. Create GitHub Release ──────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: "VNNotes ${{ steps.version.outputs.TAG }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/VNNotes-v${{ steps.version.outputs.VERSION }}-windows-portable.zip
+            dist/VNNotes_Setup.exe
