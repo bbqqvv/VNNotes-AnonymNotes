@@ -31,6 +31,43 @@ jobs:
           pip install --no-cache-dir -r requirements.txt
           pip install --no-cache-dir pyinstaller
 
+      # ── 3.5. Code Audit (catch import/syntax errors) ───────────
+      - name: Audit Python source code
+        shell: pwsh
+        run: |
+          Write-Host "=== Compiling all .py files ===" 
+          $errors = @()
+          Get-ChildItem -Path "src","plugins","main.py" -Recurse -Filter "*.py" | ForEach-Object {
+            $result = python -c "import py_compile; py_compile.compile('$($_.FullName)', doraise=True)" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+              $errors += "$($_.FullName): $result"
+              Write-Host "[FAIL] $($_.FullName)" -ForegroundColor Red
+            } else {
+              Write-Host "[OK] $($_.FullName)"
+            }
+          }
+          
+          Write-Host "`n=== Quick import check ==="
+          python -c "
+          import sys, os
+          sys.path.insert(0, os.getcwd())
+          os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+          os.environ['QT_OPENGL'] = 'desktop'
+          
+          # Test critical modules can be imported
+          from src.infrastructure.storage import StorageManager
+          from src.domain.models import Note, Folder
+          from src.domain.services.note_service import NoteService
+          print('[OK] All critical modules imported successfully')
+          "
+          
+          if ($errors.Count -gt 0) {
+            Write-Host "`n[FAILED] $($errors.Count) file(s) have errors:" -ForegroundColor Red
+            $errors | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host "`n[PASSED] All audit checks passed" -ForegroundColor Green
+
       # ── 4. Extract version from tag ────────────────────────────
       - name: Extract version from tag
         id: version

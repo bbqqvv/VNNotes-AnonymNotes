@@ -1,5 +1,6 @@
-﻿import os
+import os
 import logging
+from typing import List, Dict, Any
 from PyQt6.QtCore import QObject
 from src.infrastructure.database import DatabaseManager
 from src.domain.interfaces import IStorage
